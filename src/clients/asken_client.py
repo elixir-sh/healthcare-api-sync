@@ -1,45 +1,46 @@
 """あすけん Web 自動化クライアント（Playwright）
 
 公式APIが存在しないため、Playwrightでブラウザ操作を自動化する。
+launch_persistent_context() でブラウザプロファイルをディスクに永続化することで、
+通常のブラウザと同様にセッションが維持される。
 UIの変更により動作しなくなる可能性があり、その場合は CSV フォールバックを使用する。
 """
 
 import csv
-import json
 from datetime import date as Date
 from pathlib import Path
 
-from src.config import get_session_path, load_config
+from src.config import get_browser_profile_dir, load_config
 
 _LOGIN_URL = "https://www.asken.jp/login"
 _DIARY_URL = "https://www.asken.jp/my/diaries"
 
 
-def _get_browser_context(playwright):
-    """Playwright ブラウザコンテキストを返す（セッションを再利用する）"""
-    from playwright.sync_api import sync_playwright
-
-    session_path = get_session_path("asken")
-    storage_state = str(session_path) if session_path.exists() else None
-
-    browser = playwright.chromium.launch(headless=False)
-    context = browser.new_context(
-        storage_state=storage_state,
+def _launch(playwright, headless: bool = False):
+    """永続プロファイルでブラウザコンテキストを起動する"""
+    profile_dir = get_browser_profile_dir("asken")
+    context = playwright.chromium.launch_persistent_context(
+        user_data_dir=str(profile_dir),
+        headless=headless,
         viewport={"width": 1280, "height": 800},
         locale="ja-JP",
     )
-    return browser, context
+    return context
+
+
+def _is_logged_in(page) -> bool:
+    """ログイン状態を確認する"""
+    return "/login" not in page.url
 
 
 def authenticate() -> None:
-    """ブラウザを開いてあすけんにログインし、セッションを保存する"""
+    """ブラウザを開いてあすけんにログインし、プロファイルを永続化する"""
     from playwright.sync_api import sync_playwright
 
     cfg = load_config()["asken"]
-    session_path = get_session_path("asken")
 
     with sync_playwright() as p:
-        browser, context = _get_browser_context(p)
+        context = _launch(p, headless=False)
         page = context.new_page()
 
         print("あすけんのログインページを開きます...")
@@ -48,14 +49,17 @@ def authenticate() -> None:
 
         # メールアドレスとパスワードが設定されていれば自動入力
         if cfg.get("email") and cfg.get("password"):
-            email_input = page.locator('input[type="email"], input[name="email"], input[name="login_id"]').first
+            email_input = page.locator(
+                'input[type="email"], input[name="email"], input[name="login_id"]'
+            ).first
             password_input = page.locator('input[type="password"]').first
             if email_input.is_visible():
                 email_input.fill(cfg["email"])
             if password_input.is_visible():
                 password_input.fill(cfg["password"])
-            # ログインボタンをクリック
-            submit = page.locator('button[type="submit"], input[type="submit"]').first
+            submit = page.locator(
+                'button[type="submit"], input[type="submit"]'
+            ).first
             if submit.is_visible():
                 submit.click()
                 page.wait_for_load_state("networkidle")
@@ -64,23 +68,21 @@ def authenticate() -> None:
             print("ログイン完了後、Enterキーを押してください...")
             input()
 
-        context.storage_state(path=str(session_path))
-        browser.close()
-    print("あすけん セッションを保存しました。")
+        if _is_logged_in(page):
+            print("あすけん ログイン成功。プロファイルを保存しました。")
+        else:
+            print("警告: ログイン状態を確認できませんでした。")
 
-
-def _is_logged_in(page) -> bool:
-    """ログイン状態を確認する"""
-    return "/login" not in page.url and "/my/" in page.url
+        context.close()
 
 
 def _ensure_logged_in(page, context) -> None:
-    """未ログインの場合は例外を発生させる"""
+    """ログイン済みか確認し、未ログインなら例外を発生させる"""
     page.goto(_DIARY_URL)
     page.wait_for_load_state("networkidle")
     if not _is_logged_in(page):
         raise RuntimeError(
-            "あすけんのセッションが切れています。`python main.py auth asken` を実行してください。"
+            "あすけんのログインが必要です。`python main.py auth asken` を実行してください。"
         )
 
 
@@ -89,15 +91,13 @@ def post_weight(target_date: Date, weight_kg: float) -> None:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser, context = _get_browser_context(p)
+        context = _launch(p, headless=False)
         page = context.new_page()
         try:
             _ensure_logged_in(page, context)
             _write_weight(page, target_date, weight_kg)
-            # セッションを更新保存
-            context.storage_state(path=str(get_session_path("asken")))
         finally:
-            browser.close()
+            context.close()
 
 
 def post_calories_burned(target_date: Date, calories: int) -> None:
@@ -105,24 +105,21 @@ def post_calories_burned(target_date: Date, calories: int) -> None:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser, context = _get_browser_context(p)
+        context = _launch(p, headless=False)
         page = context.new_page()
         try:
             _ensure_logged_in(page, context)
             _write_calories(page, target_date, calories)
-            context.storage_state(path=str(get_session_path("asken")))
         finally:
-            browser.close()
+            context.close()
 
 
 def _write_weight(page, target_date: Date, weight_kg: float) -> None:
     """あすけんの日記画面で体重を入力する"""
     date_str = target_date.strftime("%Y-%m-%d")
-    diary_url = f"{_DIARY_URL}/{date_str}"
-    page.goto(diary_url)
+    page.goto(f"{_DIARY_URL}/{date_str}")
     page.wait_for_load_state("networkidle")
 
-    # 体重入力欄を探す（セレクタはUI変更で壊れる可能性あり）
     weight_input = page.locator(
         'input[name="weight"], input[placeholder*="体重"], input[id*="weight"]'
     ).first
@@ -135,9 +132,9 @@ def _write_weight(page, target_date: Date, weight_kg: float) -> None:
 
     weight_input.fill(str(round(weight_kg, 1)))
 
-    # 保存ボタンをクリック
     save_btn = page.locator(
-        'button:has-text("保存"), button:has-text("登録"), input[value*="保存"], input[value*="登録"]'
+        'button:has-text("保存"), button:has-text("登録"), '
+        'input[value*="保存"], input[value*="登録"]'
     ).first
     if save_btn.is_visible(timeout=3000):
         save_btn.click()
@@ -145,13 +142,11 @@ def _write_weight(page, target_date: Date, weight_kg: float) -> None:
 
 
 def _write_calories(page, target_date: Date, calories: int) -> None:
-    """あすけんの日記画面で消費カロリー（運動）を入力する"""
+    """あすけんの日記画面で消費カロリーを入力する"""
     date_str = target_date.strftime("%Y-%m-%d")
-    diary_url = f"{_DIARY_URL}/{date_str}"
-    page.goto(diary_url)
+    page.goto(f"{_DIARY_URL}/{date_str}")
     page.wait_for_load_state("networkidle")
 
-    # 消費カロリー入力欄を探す
     cal_input = page.locator(
         'input[name*="calorie"], input[name*="exercise"], '
         'input[placeholder*="消費"], input[placeholder*="カロリー"]'
@@ -166,7 +161,8 @@ def _write_calories(page, target_date: Date, calories: int) -> None:
     cal_input.fill(str(calories))
 
     save_btn = page.locator(
-        'button:has-text("保存"), button:has-text("登録"), input[value*="保存"], input[value*="登録"]'
+        'button:has-text("保存"), button:has-text("登録"), '
+        'input[value*="保存"], input[value*="登録"]'
     ).first
     if save_btn.is_visible(timeout=3000):
         save_btn.click()
