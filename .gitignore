@@ -1,4 +1,5 @@
-# トークン・セッション情報（認証情報なので絶対にコミットしない）
+# 認証情報・設定ファイル（絶対にコミットしない）
+config/config.yaml
 config/tokens/
 config/sync_history.db
 
