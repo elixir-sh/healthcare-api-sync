@@ -1,7 +1,7 @@
 """HealthPlanet API クライアント（タニタ体組成計データ取得）"""
 
 from dataclasses import dataclass
-from datetime import date as Date, datetime, timedelta
+from datetime import date as Date, datetime
 
 import requests
 
@@ -18,6 +18,7 @@ _TAG_MUSCLE_MASS = "6023"  # 筋肉量 (kg)
 @dataclass
 class InnerscanRecord:
     date: Date
+    measured_at: datetime  # 計測日時（同日複数回の場合は最後の計測時刻）
     weight_kg: float | None
     body_fat_pct: float | None
     muscle_mass_kg: float | None
@@ -43,15 +44,19 @@ def get_innerscan(date_from: Date, date_to: Date) -> list[InnerscanRecord]:
     resp.raise_for_status()
     data = resp.json()
 
-    # 日付ごとにデータをまとめる（同一日は後勝ち）
+    # 日付ごとにデータをまとめる（同一日は後勝ち・最新時刻を記録）
     by_date: dict[Date, dict] = {}
+    by_date_dt: dict[Date, datetime] = {}
     for item in data.get("data", []):
         # date フォーマット: "20240101120000"
         dt = datetime.strptime(item["date"], "%Y%m%d%H%M%S")
         d = dt.date()
         if d not in by_date:
             by_date[d] = {}
+            by_date_dt[d] = dt
         by_date[d][item["tag"]] = float(item["keydata"])
+        if dt > by_date_dt[d]:
+            by_date_dt[d] = dt
 
     records = []
     for d in sorted(by_date):
@@ -59,6 +64,7 @@ def get_innerscan(date_from: Date, date_to: Date) -> list[InnerscanRecord]:
         records.append(
             InnerscanRecord(
                 date=d,
+                measured_at=by_date_dt[d],
                 weight_kg=tags.get(_TAG_WEIGHT),
                 body_fat_pct=tags.get(_TAG_BODY_FAT),
                 muscle_mass_kg=tags.get(_TAG_MUSCLE_MASS),

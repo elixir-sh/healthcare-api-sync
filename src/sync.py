@@ -1,7 +1,7 @@
 """データ同期のオーケストレーションロジック"""
 
 from dataclasses import dataclass, field
-from datetime import date as Date, timedelta
+from datetime import date as Date, time as Time, timedelta
 
 from src import storage
 from src.clients import fitbit_client, healthplanet_client
@@ -34,13 +34,13 @@ def sync_range(date_from: Date, date_to: Date) -> list[SyncResult]:
 
         # --- タニタ体重 → Fitbit ---
         if hp and hp.weight_kg is not None:
-            _sync_weight_to_fitbit(current, hp.weight_kg, result)
+            _sync_weight_to_fitbit(current, hp.weight_kg, result, hp.measured_at.time())
         else:
             result.skipped.append("HealthPlanet→Fitbit 体重（データなし）")
 
         # --- タニタ体脂肪率 → Fitbit ---
         if hp and hp.body_fat_pct is not None:
-            _sync_body_fat_to_fitbit(current, hp.body_fat_pct, result)
+            _sync_body_fat_to_fitbit(current, hp.body_fat_pct, result, hp.measured_at.time())
         else:
             result.skipped.append("HealthPlanet→Fitbit 体脂肪率（データなし）")
 
@@ -50,26 +50,26 @@ def sync_range(date_from: Date, date_to: Date) -> list[SyncResult]:
     return results
 
 
-def _sync_weight_to_fitbit(d: Date, weight_kg: float, result: SyncResult) -> None:
+def _sync_weight_to_fitbit(d: Date, weight_kg: float, result: SyncResult, measured_time: Time | None = None) -> None:
     label = f"HealthPlanet→Fitbit 体重({weight_kg}kg)"
     if storage.is_synced(d, "healthplanet", "fitbit", "weight"):
         result.skipped.append(label)
         return
     try:
-        fitbit_client.post_weight(d, weight_kg)
+        fitbit_client.post_weight(d, weight_kg, measured_time)
         storage.mark_synced(d, "healthplanet", "fitbit", "weight", weight_kg)
         result.succeeded.append(label)
     except Exception as e:
         result.failed.append((label, str(e)))
 
 
-def _sync_body_fat_to_fitbit(d: Date, body_fat_pct: float, result: SyncResult) -> None:
+def _sync_body_fat_to_fitbit(d: Date, body_fat_pct: float, result: SyncResult, measured_time: Time | None = None) -> None:
     label = f"HealthPlanet→Fitbit 体脂肪率({body_fat_pct}%)"
     if storage.is_synced(d, "healthplanet", "fitbit", "body_fat"):
         result.skipped.append(label)
         return
     try:
-        fitbit_client.post_body_fat(d, body_fat_pct)
+        fitbit_client.post_body_fat(d, body_fat_pct, measured_time)
         storage.mark_synced(d, "healthplanet", "fitbit", "body_fat", body_fat_pct)
         result.succeeded.append(label)
     except Exception as e:

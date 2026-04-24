@@ -5,7 +5,7 @@ NOTE: レガシーFitbit Web APIは2026年9月廃止予定。
 移行時は本ファイルを差し替えるだけで対応できるよう、インターフェースを統一している。
 """
 
-from datetime import date as Date
+from datetime import date as Date, time as Time
 
 import requests
 
@@ -34,29 +34,35 @@ def get_calories(target_date: Date) -> int | None:
     return int(calories_out)
 
 
-def post_weight(target_date: Date, weight_kg: float) -> None:
+def post_weight(target_date: Date, weight_kg: float, measured_time: Time | None = None) -> None:
     """指定日の体重（kg）を Fitbit に書き込む"""
+    data: dict = {
+        "weight": round(weight_kg, 2),
+        "date": target_date.strftime("%Y-%m-%d"),
+    }
+    if measured_time is not None:
+        data["time"] = measured_time.strftime("%H:%M:%S")
     resp = requests.post(
         f"{_BASE_URL}/1/user/-/body/log/weight.json",
         headers=_headers(),
-        data={
-            "weight": round(weight_kg, 2),
-            "date": target_date.strftime("%Y-%m-%d"),
-        },
+        data=data,
         timeout=30,
     )
     resp.raise_for_status()
 
 
-def post_body_fat(target_date: Date, body_fat_pct: float) -> None:
+def post_body_fat(target_date: Date, body_fat_pct: float, measured_time: Time | None = None) -> None:
     """指定日の体脂肪率（%）を Fitbit に書き込む"""
+    data: dict = {
+        "fat": round(body_fat_pct, 1),
+        "date": target_date.strftime("%Y-%m-%d"),
+    }
+    if measured_time is not None:
+        data["time"] = measured_time.strftime("%H:%M:%S")
     resp = requests.post(
         f"{_BASE_URL}/1/user/-/body/log/fat.json",
         headers=_headers(),
-        data={
-            "fat": round(body_fat_pct, 1),
-            "date": target_date.strftime("%Y-%m-%d"),
-        },
+        data=data,
         timeout=30,
     )
     resp.raise_for_status()
