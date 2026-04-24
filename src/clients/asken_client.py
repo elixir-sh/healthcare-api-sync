@@ -46,6 +46,10 @@ def authenticate() -> None:
         page.goto(_LOGIN_URL)
         input()
 
+        # ダイアリーページへ遷移してログイン状態を確認する
+        page.goto(_DIARY_URL)
+        page.wait_for_load_state("networkidle")
+
         if _is_logged_in(page):
             print("あすけん ログイン成功。プロファイルを保存しました。")
         else:
