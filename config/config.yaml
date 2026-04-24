@@ -1,0 +1,25 @@
+# Fitbit Developer Console で取得したクライアント情報
+# https://dev.fitbit.com/apps
+fitbit:
+  client_id: ""
+  client_secret: ""
+  redirect_uri: "http://localhost:8080/callback"
+
+# HealthPlanet API設定
+# https://www.healthplanet.jp/apis/api.do
+healthplanet:
+  client_id: ""
+  client_secret: ""
+  redirect_uri: "http://localhost:8080/callback"
+
+# あすけんアカウント情報（Playwrightログインに使用）
+asken:
+  email: ""
+  password: ""
+
+# 同期設定
+sync:
+  # デフォルトの同期日数（直近N日分）
+  default_days: 7
+  # あすけん書き込みに失敗した場合のCSV出力先
+  fallback_csv_dir: "./output"
