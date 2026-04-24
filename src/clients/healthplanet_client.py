@@ -33,8 +33,9 @@ def get_innerscan(date_from: Date, date_to: Date) -> list[InnerscanRecord]:
         params={
             "access_token": get_access_token(),
             "date": 1,  # 計測日時で取得
-            "from": date_from.strftime("%Y%m%d%H%M%S"),
-            "to": date_to.strftime("%Y%m%d%H%M%S"),
+            # date は時刻を持たないため、from は日の始まり・to は日の終わりに固定する
+            "from": date_from.strftime("%Y%m%d") + "000000",
+            "to": date_to.strftime("%Y%m%d") + "235959",
             "tag": ",".join([_TAG_WEIGHT, _TAG_BODY_FAT, _TAG_MUSCLE_MASS]),
         },
         timeout=30,

@@ -42,6 +42,41 @@ def auth_asken():
     authenticate()
 
 
+@cli.command("debug-asken")
+@click.argument("target_date", default=None, required=False)
+def debug_asken(target_date: str | None):
+    """あすけんの日記ページにある input 要素を一覧表示する（セレクタ調査用）"""
+    from datetime import date as Date
+    from playwright.sync_api import sync_playwright
+    from src.config import get_browser_profile_dir
+
+    d = target_date or Date.today().strftime("%Y-%m-%d")
+    url = f"https://www.asken.jp/my/diaries/{d}"
+
+    with sync_playwright() as p:
+        profile_dir = get_browser_profile_dir("asken")
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=str(profile_dir),
+            headless=False,
+            locale="ja-JP",
+        )
+        page = context.new_page()
+        page.goto(url)
+        page.wait_for_load_state("networkidle")
+
+        inputs = page.locator("input, textarea, select").all()
+        click.echo(f"\n{url} の入力要素一覧（{len(inputs)}件）:\n")
+        for el in inputs:
+            attrs = {
+                k: el.get_attribute(k)
+                for k in ["type", "name", "id", "placeholder", "class"]
+                if el.get_attribute(k)
+            }
+            click.echo(f"  {attrs}")
+
+        context.close()
+
+
 @cli.command()
 @click.option(
     "--date",
