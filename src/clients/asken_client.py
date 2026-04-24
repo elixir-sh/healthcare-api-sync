@@ -10,7 +10,7 @@ import csv
 from datetime import date as Date
 from pathlib import Path
 
-from src.config import get_browser_profile_dir, load_config
+from src.config import get_browser_profile_dir
 
 _LOGIN_URL = "https://www.asken.jp/login"
 _DIARY_URL = "https://www.asken.jp/my/diaries"
@@ -37,44 +37,20 @@ def authenticate() -> None:
     """ブラウザを開いてあすけんにログインし、プロファイルを永続化する"""
     from playwright.sync_api import sync_playwright
 
-    cfg = load_config()["asken"]
-
     with sync_playwright() as p:
         context = _launch(p, headless=False)
         page = context.new_page()
 
         print("あすけんのログインページを開きます...")
+        print("ブラウザでログインし、完了したらここでEnterを押してください...")
         page.goto(_LOGIN_URL)
-        page.wait_for_load_state("networkidle")
-
-        # メールアドレスとパスワードが設定されていれば自動入力を試みる
-        if cfg.get("email") and cfg.get("password"):
-            email_input = page.locator(
-                'input[type="email"], input[name="email"], input[name="login_id"]'
-            ).first
-            password_input = page.locator('input[type="password"]').first
-            if email_input.is_visible() and password_input.is_visible():
-                email_input.fill(cfg["email"])
-                password_input.fill(cfg["password"])
-                submit = page.locator(
-                    'button[type="submit"], input[type="submit"]'
-                ).first
-                if submit.is_visible():
-                    submit.click()
-                    page.wait_for_load_state("networkidle")
-
-        # ログインできていない場合は手動ログインを促す
-        if not _is_logged_in(page):
-            print()
-            print("自動ログインができませんでした。")
-            print("開いているブラウザで手動でログインし、完了したらここでEnterを押してください...")
-            input()
+        input()
 
         if _is_logged_in(page):
             print("あすけん ログイン成功。プロファイルを保存しました。")
         else:
             context.close()
-            raise RuntimeError("ログインに失敗しました。メールアドレスとパスワードを確認してください。")
+            raise RuntimeError("ログインに失敗しました。ブラウザでログインしてからEnterを押してください。")
 
         context.close()
 

@@ -12,11 +12,6 @@ healthplanet:
   client_secret: ""
   redirect_uri: "http://localhost:8080/callback"
 
-# あすけんアカウント情報（Playwrightログインに使用）
-asken:
-  email: ""
-  password: ""
-
 # 同期設定
 sync:
   # デフォルトの同期日数（直近N日分）
