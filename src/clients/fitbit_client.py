@@ -46,3 +46,17 @@ def post_weight(target_date: Date, weight_kg: float) -> None:
         timeout=30,
     )
     resp.raise_for_status()
+
+
+def post_body_fat(target_date: Date, body_fat_pct: float) -> None:
+    """指定日の体脂肪率（%）を Fitbit に書き込む"""
+    resp = requests.post(
+        f"{_BASE_URL}/1/user/-/body/log/fat.json",
+        headers=_headers(),
+        data={
+            "fat": round(body_fat_pct, 1),
+            "date": target_date.strftime("%Y-%m-%d"),
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()

@@ -84,6 +84,7 @@ def sync(target_date: str | None, days: int | None, dry_run: bool):
             click.echo(f"\n📅 {current}")
             checks = [
                 ("HealthPlanet→Fitbit 体重", "healthplanet", "fitbit", "weight"),
+                ("HealthPlanet→Fitbit 体脂肪率", "healthplanet", "fitbit", "body_fat"),
             ]
             for label, src, dst, dtype in checks:
                 status = "✅ 同期済み" if storage.is_synced(current, src, dst, dtype) else "⬜ 未同期"

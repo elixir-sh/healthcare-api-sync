@@ -38,6 +38,12 @@ def sync_range(date_from: Date, date_to: Date) -> list[SyncResult]:
         else:
             result.skipped.append("HealthPlanet→Fitbit 体重（データなし）")
 
+        # --- タニタ体脂肪率 → Fitbit ---
+        if hp and hp.body_fat_pct is not None:
+            _sync_body_fat_to_fitbit(current, hp.body_fat_pct, result)
+        else:
+            result.skipped.append("HealthPlanet→Fitbit 体脂肪率（データなし）")
+
         results.append(result)
         current += timedelta(days=1)
 
@@ -52,6 +58,19 @@ def _sync_weight_to_fitbit(d: Date, weight_kg: float, result: SyncResult) -> Non
     try:
         fitbit_client.post_weight(d, weight_kg)
         storage.mark_synced(d, "healthplanet", "fitbit", "weight", weight_kg)
+        result.succeeded.append(label)
+    except Exception as e:
+        result.failed.append((label, str(e)))
+
+
+def _sync_body_fat_to_fitbit(d: Date, body_fat_pct: float, result: SyncResult) -> None:
+    label = f"HealthPlanet→Fitbit 体脂肪率({body_fat_pct}%)"
+    if storage.is_synced(d, "healthplanet", "fitbit", "body_fat"):
+        result.skipped.append(label)
+        return
+    try:
+        fitbit_client.post_body_fat(d, body_fat_pct)
+        storage.mark_synced(d, "healthplanet", "fitbit", "body_fat", body_fat_pct)
         result.succeeded.append(label)
     except Exception as e:
         result.failed.append((label, str(e)))
