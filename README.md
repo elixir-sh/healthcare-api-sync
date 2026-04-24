@@ -1,17 +1,17 @@
 # healthcare-api-sync
 
-Fitbit・タニタ HealthPlanet・あすけん 間で健康データを自動同期するローカル CLI ツール。
+タニタ HealthPlanet の体組成データを Fitbit に自動同期するローカル CLI ツール。
 
 ## データフロー
 
 ```
 タニタ HealthPlanet
-   ├─→ 体重 ──→ Fitbit
-   └─→ 体重 ──→ あすけん
-
-Fitbit
-   └─→ 消費カロリー ──→ あすけん
+   ├─→ 体重    ──→ Fitbit
+   └─→ 体脂肪率 ──→ Fitbit
 ```
+
+> **あすけんへの同期について**  
+> あすけんは Fitbit との公式連携機能を持つため、Fitbit にデータを書き込めば自動で反映されます。
 
 ## 必要なもの
 
@@ -19,7 +19,6 @@ Fitbit
 - 各サービスのアカウント
   - [Fitbit](https://www.fitbit.com/)
   - [HealthPlanet（タニタ）](https://www.healthplanet.jp/)
-  - [あすけん](https://www.asken.jp/)
 
 ## セットアップ
 
@@ -27,7 +26,6 @@ Fitbit
 
 ```bash
 python3 -m pip install -r requirements.txt
-python3 -m playwright install chromium
 ```
 
 ### 2. API アプリを登録する
@@ -52,7 +50,7 @@ python3 -m playwright install chromium
    | 項目 | 値 |
    |---|---|
    | アプリケーションタイプ | **Webアプリケーション** |
-   | リダイレクト URI | `http://localhost:8080/callback` |
+   | ホストドメイン | `www.healthplanet.jp` |
    | スコープ | `innerscan` |
 
 3. 表示された `Client ID` と `Client Secret` を控える
@@ -73,10 +71,6 @@ fitbit:
 healthplanet:
   client_id: "取得したClient ID"
   client_secret: "取得したClient Secret"
-
-asken:
-  email: "あすけんのメールアドレス"
-  password: "あすけんのパスワード"
 ```
 
 ### 4. 認証する
@@ -86,8 +80,12 @@ asken:
 ```bash
 python3 main.py auth fitbit        # ブラウザが開く → Fitbit でログイン・許可
 python3 main.py auth healthplanet  # ブラウザが開く → HealthPlanet でログイン・許可
-python3 main.py auth asken         # ブラウザが開く → あすけんでログイン
 ```
+
+> **HealthPlanet 認証の手順**  
+> HealthPlanet は外部コールバック URL を受け付けないため、認証後に表示される  
+> `https://www.healthplanet.jp/success.html?code=...` の URL をコピーして  
+> ターミナルのエディタにペーストする方式を採用しています。
 
 認証トークンは `config/tokens/` にローカル保存される（git 管理外）。
 
@@ -115,11 +113,6 @@ Fitbit レガシー Web API は **2026年9月に廃止予定**。
 移行先は [Google Health API](https://developers.google.com/health/migration)。  
 廃止後は `src/clients/fitbit_client.py` を差し替えることで対応できる設計にしている。
 
-### あすけんの自動化について
-
-あすけんは外部書き込み用の公式 API を提供していないため、Playwright でブラウザ操作を自動化している。  
-UI の変更により動作しなくなる可能性があり、その場合は `output/asken_fallback.csv` にデータが書き出される。
-
 ## ファイル構成
 
 ```
@@ -134,8 +127,7 @@ healthcare-api-sync/
 │   │   └── healthplanet_auth.py  # HealthPlanet OAuth 2.0
 │   ├── clients/
 │   │   ├── fitbit_client.py        # Fitbit API クライアント
-│   │   ├── healthplanet_client.py  # HealthPlanet API クライアント
-│   │   └── asken_client.py         # あすけん Playwright 自動化
+│   │   └── healthplanet_client.py  # HealthPlanet API クライアント
 │   ├── config.py   # 設定管理
 │   ├── storage.py  # SQLite による二重書き込み防止
 │   └── sync.py     # 同期ロジック
