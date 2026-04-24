@@ -1,6 +1,12 @@
 """健康データ集約・同期ツール CLI エントリポイント"""
 
 import sys
+
+if sys.version_info < (3, 10):
+    current_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    print(f"エラー: Python 3.10以上が必要です（現在: {current_version}）", file=sys.stderr)
+    sys.exit(1)
+
 from datetime import date as Date, datetime, timedelta
 
 import click
