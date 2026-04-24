@@ -47,31 +47,34 @@ def authenticate() -> None:
         page.goto(_LOGIN_URL)
         page.wait_for_load_state("networkidle")
 
-        # メールアドレスとパスワードが設定されていれば自動入力
+        # メールアドレスとパスワードが設定されていれば自動入力を試みる
         if cfg.get("email") and cfg.get("password"):
             email_input = page.locator(
                 'input[type="email"], input[name="email"], input[name="login_id"]'
             ).first
             password_input = page.locator('input[type="password"]').first
-            if email_input.is_visible():
+            if email_input.is_visible() and password_input.is_visible():
                 email_input.fill(cfg["email"])
-            if password_input.is_visible():
                 password_input.fill(cfg["password"])
-            submit = page.locator(
-                'button[type="submit"], input[type="submit"]'
-            ).first
-            if submit.is_visible():
-                submit.click()
-                page.wait_for_load_state("networkidle")
-        else:
-            print("config.yaml に email/password が未設定です。手動でログインしてください。")
-            print("ログイン完了後、Enterキーを押してください...")
+                submit = page.locator(
+                    'button[type="submit"], input[type="submit"]'
+                ).first
+                if submit.is_visible():
+                    submit.click()
+                    page.wait_for_load_state("networkidle")
+
+        # ログインできていない場合は手動ログインを促す
+        if not _is_logged_in(page):
+            print()
+            print("自動ログインができませんでした。")
+            print("開いているブラウザで手動でログインし、完了したらここでEnterを押してください...")
             input()
 
         if _is_logged_in(page):
             print("あすけん ログイン成功。プロファイルを保存しました。")
         else:
-            print("警告: ログイン状態を確認できませんでした。")
+            context.close()
+            raise RuntimeError("ログインに失敗しました。メールアドレスとパスワードを確認してください。")
 
         context.close()
 
