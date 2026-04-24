@@ -12,7 +12,7 @@ from src.config import load_config
 def cli():
     """健康データ集約・同期ツール
 
-    Fitbit・タニタ HealthPlanet・あすけん 間でデータを同期します。
+    タニタ HealthPlanet の体重データを Fitbit に同期します。
     """
 
 
@@ -33,48 +33,6 @@ def auth_healthplanet():
     """HealthPlanet OAuth 2.0 認証（ブラウザが開きます）"""
     from src.auth.healthplanet_auth import authenticate
     authenticate()
-
-
-@auth.command("asken")
-def auth_asken():
-    """あすけん ログイン（Playwright ブラウザが開きます）"""
-    from src.clients.asken_client import authenticate
-    authenticate()
-
-
-@cli.command("debug-asken")
-@click.argument("target_date", default=None, required=False)
-def debug_asken(target_date: str | None):
-    """あすけんの日記ページにある input 要素を一覧表示する（セレクタ調査用）"""
-    from datetime import date as Date
-    from playwright.sync_api import sync_playwright
-    from src.config import get_browser_profile_dir
-
-    d = target_date or Date.today().strftime("%Y-%m-%d")
-    url = f"https://www.asken.jp/my/diaries/{d}"
-
-    with sync_playwright() as p:
-        profile_dir = get_browser_profile_dir("asken")
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=str(profile_dir),
-            headless=False,
-            locale="ja-JP",
-        )
-        page = context.new_page()
-        page.goto(url)
-        page.wait_for_load_state("networkidle")
-
-        inputs = page.locator("input, textarea, select").all()
-        click.echo(f"\n{url} の入力要素一覧（{len(inputs)}件）:\n")
-        for el in inputs:
-            attrs = {
-                k: el.get_attribute(k)
-                for k in ["type", "name", "id", "placeholder", "class"]
-                if el.get_attribute(k)
-            }
-            click.echo(f"  {attrs}")
-
-        context.close()
 
 
 @cli.command()
@@ -119,7 +77,6 @@ def sync(target_date: str | None, days: int | None, dry_run: bool):
 
     if dry_run:
         click.echo("（ドライラン: 実際の書き込みは行いません）")
-        # ドライランは同期済みチェックだけ行い実行はしない
         from src import storage
         storage.init_db()
         current = date_from
@@ -127,8 +84,6 @@ def sync(target_date: str | None, days: int | None, dry_run: bool):
             click.echo(f"\n📅 {current}")
             checks = [
                 ("HealthPlanet→Fitbit 体重", "healthplanet", "fitbit", "weight"),
-                ("HealthPlanet→あすけん 体重", "healthplanet", "asken", "weight"),
-                ("Fitbit→あすけん 消費カロリー", "fitbit", "asken", "calories"),
             ]
             for label, src, dst, dtype in checks:
                 status = "✅ 同期済み" if storage.is_synced(current, src, dst, dtype) else "⬜ 未同期"

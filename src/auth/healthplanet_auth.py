@@ -1,11 +1,13 @@
-"""HealthPlanet OAuth 2.0 認証フローを処理するモジュール"""
+"""HealthPlanet OAuth 2.0 認証フローを処理するモジュール
+
+HealthPlanet の OAuth は外部コールバックURLを受け付けないため、
+redirect_uri に HealthPlanet 自身のページを使い、
+認証後のリダイレクト先URLをユーザーに手動でペーストしてもらう方式を採用する。
+"""
 
 import json
-import secrets
-import time
 import webbrowser
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
@@ -15,49 +17,6 @@ from src.config import get_token_path, load_config
 _AUTH_URL = "https://www.healthplanet.jp/oauth/auth"
 _TOKEN_URL = "https://www.healthplanet.jp/oauth/token"
 _SCOPES = "innerscan"
-
-
-class _CallbackHandler(BaseHTTPRequestHandler):
-    auth_code: str | None = None
-    error: str | None = None
-
-    def do_GET(self):
-        params = parse_qs(urlparse(self.path).query)
-        if "code" in params:
-            _CallbackHandler.auth_code = params["code"][0]
-            body = "認証成功。このタブを閉じてください。".encode("utf-8")
-            body = b"<html><body><p>" + body + b"</p></body></html>"
-        else:
-            _CallbackHandler.error = params.get("error", ["unknown"])[0]
-            body = "認証エラー。".encode("utf-8")
-            body = b"<html><body><p>" + body + b"</p></body></html>"
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args):
-        pass
-
-
-def _wait_for_callback(port: int, timeout: int = 120) -> str:
-    _CallbackHandler.auth_code = None
-    _CallbackHandler.error = None
-    server = HTTPServer(("localhost", port), _CallbackHandler)
-    server.timeout = 1
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        server.handle_request()
-        if _CallbackHandler.auth_code:
-            server.server_close()
-            return _CallbackHandler.auth_code
-        if _CallbackHandler.error:
-            server.server_close()
-            raise RuntimeError(f"HealthPlanet 認証エラー: {_CallbackHandler.error}")
-
-    server.server_close()
-    raise TimeoutError("HealthPlanet 認証がタイムアウトしました")
 
 
 def _exchange_code_for_token(code: str, config: dict) -> dict:
@@ -117,24 +76,62 @@ def _is_expired(token: dict) -> bool:
     return elapsed >= (expires_in - 300)
 
 
-def authenticate() -> None:
-    """ブラウザを開いて HealthPlanet OAuthフローを実行し、トークンを保存する"""
-    cfg = load_config()["healthplanet"]
-    port = int(urlparse(cfg["redirect_uri"]).port or 8080)
-    state = secrets.token_urlsafe(16)
+def _extract_code_from_url(pasted_url: str) -> str:
+    """ユーザーがペーストしたURLから認証コードを抽出する"""
+    pasted_url = pasted_url.strip()
+    params = parse_qs(urlparse(pasted_url).query)
+    if "code" not in params:
+        raise ValueError(f"URLにcodeが含まれていません: {pasted_url}")
+    return params["code"][0]
 
-    params = {
+
+def authenticate() -> None:
+    """ブラウザを開いて HealthPlanet OAuthフローを実行し、トークンを保存する。
+
+    HealthPlanet は外部コールバックURLを受け付けないため、
+    認証後のリダイレクト先URLをユーザーにエディタでペーストしてもらう。
+    """
+    import click
+
+    cfg = load_config()["healthplanet"]
+
+    base = urlencode({
         "client_id": cfg["client_id"],
         "response_type": "code",
         "scope": _SCOPES,
-        "redirect_uri": cfg["redirect_uri"],
-        "state": state,
-    }
-    url = f"{_AUTH_URL}?{urlencode(params)}"
+    })
+    url = f"{_AUTH_URL}?{base}&redirect_uri={cfg['redirect_uri']}"
+
     print("ブラウザで HealthPlanet 認証ページを開きます...")
     webbrowser.open(url)
+    print()
+    print("【手順】")
+    print("  1. ブラウザでログイン・アプリ連携を許可してください")
+    print(f"  2. リダイレクト後のURL（{cfg['redirect_uri']}?code=...）をコピーしてください")
+    print("  3. Enterを押すとエディタが開くので、URLをペーストして保存・終了してください")
+    print()
+    input("準備ができたらEnterを押してください...")
 
-    code = _wait_for_callback(port)
+    # エディタでURLをペーストしてもらう（編集しやすい）
+    template = (
+        "# リダイレクト後のURLをこのファイルにペーストして保存・終了してください\n"
+        "# （# で始まる行は無視されます）\n"
+        "\n"
+    )
+    result = click.edit(template)
+    if not result:
+        raise RuntimeError("URLが入力されませんでした。")
+
+    # コメント行・空行を除いた最初の行をURLとして使用
+    pasted = next(
+        (line.strip() for line in result.splitlines()
+         if line.strip() and not line.strip().startswith("#")),
+        "",
+    )
+    if not pasted:
+        raise RuntimeError("URLが入力されませんでした。")
+
+    code = _extract_code_from_url(pasted)
     token = _exchange_code_for_token(code, cfg)
     _save_token(token)
     print("HealthPlanet 認証完了。トークンを保存しました。")

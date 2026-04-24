@@ -16,5 +16,3 @@ healthplanet:
 sync:
   # デフォルトの同期日数（直近N日分）
   default_days: 7
-  # あすけん書き込みに失敗した場合のCSV出力先
-  fallback_csv_dir: "./output"

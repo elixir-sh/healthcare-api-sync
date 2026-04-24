@@ -30,8 +30,3 @@ def get_session_path(service: str) -> Path:
     return TOKEN_DIR / f"{service}_session.json"
 
 
-def get_browser_profile_dir(service: str) -> Path:
-    """Playwright 永続ブラウザプロファイルのディレクトリを返す"""
-    profile_dir = TOKEN_DIR / f"{service}_browser_profile"
-    profile_dir.mkdir(parents=True, exist_ok=True)
-    return profile_dir
