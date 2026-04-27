@@ -12,13 +12,13 @@ pkg install -y python git cronie
 
 echo ""
 echo "=== Python依存ライブラリのインストール ==="
-pip install -r "$REPO_DIR/requirements.txt"
+python -m pip install -r "$REPO_DIR/requirements.txt"
 
 echo ""
 echo "=== Termux:Boot 設定（起動時にcrondを自動起動）==="
 mkdir -p ~/.termux/boot
 cat > ~/.termux/boot/start_crond.sh << 'EOF'
-#!/bin/bash
+#!/data/data/com.termux/files/usr/bin/bash
 crond
 EOF
 chmod +x ~/.termux/boot/start_crond.sh
@@ -27,7 +27,7 @@ echo ""
 echo "=== cron ジョブの登録（毎日12時に自動同期）==="
 SYNC_SCRIPT="$REPO_DIR/scripts/termux_sync.sh"
 chmod +x "$SYNC_SCRIPT"
-CRON_JOB="0 12 * * * bash $SYNC_SCRIPT"
+CRON_JOB="0 12 * * * bash \"$SYNC_SCRIPT\""
 
 # 同じジョブが既に登録されていなければ追加
 if ! crontab -l 2>/dev/null | grep -qF "$SYNC_SCRIPT"; then
@@ -42,8 +42,8 @@ echo "=== Termux:Widget 用ショートカット（オプション）==="
 SHORTCUT_DIR="$HOME/.shortcuts"
 mkdir -p "$SHORTCUT_DIR"
 cat > "$SHORTCUT_DIR/HealthSync" << EOF
-#!/bin/bash
-bash $SYNC_SCRIPT
+#!/data/data/com.termux/files/usr/bin/bash
+bash "$SYNC_SCRIPT"
 EOF
 chmod +x "$SHORTCUT_DIR/HealthSync"
 echo "作成しました: $SHORTCUT_DIR/HealthSync"

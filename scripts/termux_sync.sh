@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/data/data/com.termux/files/usr/bin/bash
 # Termux上でsyncを実行するラッパー。cronおよびTermux:Widgetから呼ばれる。
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
