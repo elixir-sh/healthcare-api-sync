@@ -106,6 +106,70 @@ uv run python main.py sync --days 30
 uv run python main.py sync --dry-run
 ```
 
+## Androidスマホからの実行
+
+[Termux](https://termux.dev/) を使うことで、Android スマホ上で Python を動かして自動実行できます。
+
+### 必要なアプリ（F-Droid からインストール）
+
+> **注意:** Google Play 版の Termux は長期間更新されておらず、Termux:Boot との互換性がありません。  
+> 必ず [F-Droid](https://f-droid.org/) からインストールしてください。
+
+| アプリ | 用途 |
+|---|---|
+| [Termux](https://f-droid.org/packages/com.termux/) | Linux 端末エミュレータ（必須） |
+| [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) | 端末再起動時に crond を自動起動（必須） |
+| [Termux:Widget](https://f-droid.org/packages/com.termux.widget/) | ホーム画面ウィジェットから手動実行（任意） |
+| [Termux:API](https://f-droid.org/packages/com.termux.api/) | 同期完了をトースト通知で受け取る（任意） |
+
+### セットアップ手順
+
+#### 1. リポジトリを clone
+
+```bash
+git clone https://github.com/elixir-sh/healthcare-api-sync.git
+cd healthcare-api-sync
+```
+
+#### 2. セットアップスクリプトを実行
+
+```bash
+bash setup_termux.sh
+```
+
+以下が自動で設定されます。
+
+- 必要パッケージのインストール（Python・cronie）
+- 毎日 12 時に自動同期する cron ジョブの登録
+- 端末起動時に crond を自動起動する Termux:Boot スクリプトの配置
+- Termux:Widget 用ショートカットの配置（`~/.shortcuts/HealthSync`）
+
+#### 3. 認証する
+
+PC で認証済みのトークンを Termux に転送するか、Termux 上で直接認証します。
+
+```bash
+python main.py auth fitbit        # ブラウザが開く → Fitbit でログイン・許可
+python main.py auth healthplanet  # URL をコピーして貼り付け → HealthPlanet 認証
+```
+
+> **HealthPlanet の認証について**  
+> HealthPlanet はコールバック URL を受け付けないため、スマホ上での認証は操作が煩雑です。  
+> PC 上で認証してから `config/tokens/` のファイルを Termux に転送する方が楽です。
+
+#### 4. 動作確認
+
+```bash
+bash scripts/termux_sync.sh
+```
+
+ログは `~/logs/healthcare_sync.log` に記録されます。
+
+#### 5. （オプション）ホーム画面から手動実行
+
+Termux:Widget をインストールしてホーム画面にウィジェットを追加すると、  
+**HealthSync** ショートカットが表示されワンタップで同期を実行できます。
+
 ## 注意事項
 
 ### Fitbit Web API の廃止について
@@ -132,6 +196,9 @@ healthcare-api-sync/
 │   ├── config.py   # 設定管理
 │   ├── storage.py  # SQLite による二重書き込み防止
 │   └── sync.py     # 同期ロジック
+├── scripts/
+│   └── termux_sync.sh  # Termux 用同期ラッパー（cron・Widget から呼ばれる）
+├── setup_termux.sh  # Termux 環境セットアップスクリプト
 ├── main.py          # CLI エントリポイント
 ├── pyproject.toml   # uv プロジェクト設定・依存関係定義
 └── uv.lock          # 依存関係のロックファイル
