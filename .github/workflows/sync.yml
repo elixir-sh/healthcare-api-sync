@@ -110,6 +110,8 @@ jobs:
           done
 
       - name: 同期を実行
+        # inputs は workflow_dispatch 以外(schedule 等)では空値になるだけでエラーにはならず、
+        # 下記の -n 判定で「未指定」として扱われる(push イベントでの再現テストで確認済み)
         env:
           IN_DATE: ${{ inputs.date }}
           IN_DAYS: ${{ inputs.days }}
