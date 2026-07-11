@@ -80,7 +80,10 @@ jobs:
             if openssl enc -d -aes-256-cbc -pbkdf2 -pass env:STATE_PASSPHRASE -in state.tar.gz.enc | tar xz; then
               echo "キャッシュから状態(トークン・同期履歴)を復元しました"
             else
+              # 部分展開されたファイルが残ると Secrets からの初期化が働かないため消してから進む
               echo "キャッシュの復号に失敗したため Secrets から初期化します"
+              rm -rf config/tokens config/sync_history.db
+              mkdir -p config/tokens
             fi
           fi
 
@@ -119,7 +122,13 @@ jobs:
                 -e 's/[0-9]+(\.[0-9]+)?[[:space:]]*(kg|%)/***\2/g' \
                 -e 's/access_token=[^&[:space:]"]*/access_token=***/g' \
             | tee sync_output.log
-          rc=${PIPESTATUS[0]}
+          ps=("${PIPESTATUS[@]}")
+          rc=${ps[0]}
+          # マスキング(sed)・保存(tee)の失敗も成功扱いにせず step を落とす
+          if [ "$rc" -eq 0 ] && { [ "${ps[1]}" -ne 0 ] || [ "${ps[2]}" -ne 0 ]; }; then
+            echo "出力処理に失敗しました: sed=${ps[1]} tee=${ps[2]}"
+            rc=1
+          fi
 
           {
             echo "### 同期結果"

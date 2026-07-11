@@ -29,7 +29,9 @@ gh secret set FITBIT_TOKEN_JSON < config/tokens/fitbit_token.json
 gh secret set HEALTHPLANET_TOKEN_JSON < config/tokens/healthplanet_token.json
 
 # 状態キャッシュ暗号化用のパスフレーズ(既存があれば維持し、キャッシュを無効化しない)
-if gh secret list --json name -q '.[].name' | grep -qx STATE_PASSPHRASE; then
+# 一覧取得の失敗時はここで止める(誤って再生成すると既存キャッシュを読めなくするため)
+existing_secrets=$(gh secret list --json name -q '.[].name')
+if grep -qx STATE_PASSPHRASE <<< "$existing_secrets"; then
   echo "STATE_PASSPHRASE は設定済みのため維持します"
 else
   openssl rand -base64 32 | gh secret set STATE_PASSPHRASE
