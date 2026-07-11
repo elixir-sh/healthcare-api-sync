@@ -1,0 +1,177 @@
+# スマホ(GitHub モバイルアプリ等)から同期を手動実行するためのワークフロー
+#
+# 状態の持ち回り:
+#   - Fitbit はリフレッシュのたびにリフレッシュトークンが差し替わるため、
+#     実行後のトークンと同期履歴 DB を暗号化して Actions キャッシュに保存し、次回復元する
+#   - キャッシュがない場合(初回・7日以上未実行)は Secrets のトークンで初期化する
+#   - Secret GH_PAT があれば最新トークンを Secrets に書き戻し、キャッシュ失効後も自動復旧できる
+#
+# ログの取り扱い:
+#   - public リポジトリでログは誰でも見られるため、体重などの数値と認証情報はマスクする
+name: sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "同期する日付(YYYY-MM-DD)。省略時は直近N日分"
+        required: false
+        default: ""
+      days:
+        description: "直近何日分を同期するか。省略時は config の default_days"
+        required: false
+        default: ""
+      dry_run:
+        description: "書き込まずに同期対象のみ確認する"
+        type: boolean
+        required: false
+        default: false
+
+# トークンのリフレッシュ競合を避けるため直列実行にする(実行中のものは止めない)
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # ランナーは UTC のため、「今日」の判定を日本時間に合わせる
+  TZ: Asia/Tokyo
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: 依存関係をインストール
+        run: uv sync --frozen
+
+      - name: 前回実行の状態を復元
+        uses: actions/cache/restore@v4
+        with:
+          path: state.tar.gz.enc
+          # key は毎回一意にし、restore-keys の前方一致で最新の状態を取得する
+          key: sync-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            sync-state-
+
+      - name: 状態を展開(キャッシュがなければ Secrets から初期化)
+        env:
+          STATE_PASSPHRASE: ${{ secrets.STATE_PASSPHRASE }}
+          CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
+          FITBIT_TOKEN_JSON: ${{ secrets.FITBIT_TOKEN_JSON }}
+          HEALTHPLANET_TOKEN_JSON: ${{ secrets.HEALTHPLANET_TOKEN_JSON }}
+        run: |
+          set -euo pipefail
+          : "${STATE_PASSPHRASE:?Secret STATE_PASSPHRASE が未設定です。scripts/setup_github_secrets.sh を実行してください}"
+          : "${CONFIG_YAML:?Secret CONFIG_YAML が未設定です。scripts/setup_github_secrets.sh を実行してください}"
+
+          mkdir -p config/tokens
+          printf '%s\n' "$CONFIG_YAML" > config/config.yaml
+
+          if [ -f state.tar.gz.enc ]; then
+            if openssl enc -d -aes-256-cbc -pbkdf2 -pass env:STATE_PASSPHRASE -in state.tar.gz.enc | tar xz; then
+              echo "キャッシュから状態(トークン・同期履歴)を復元しました"
+            else
+              echo "キャッシュの復号に失敗したため Secrets から初期化します"
+            fi
+          fi
+
+          if [ ! -f config/tokens/fitbit_token.json ]; then
+            : "${FITBIT_TOKEN_JSON:?Secret FITBIT_TOKEN_JSON が未設定です。scripts/setup_github_secrets.sh を実行してください}"
+            printf '%s\n' "$FITBIT_TOKEN_JSON" > config/tokens/fitbit_token.json
+            echo "Fitbit トークンを Secrets から初期化しました"
+          fi
+          if [ ! -f config/tokens/healthplanet_token.json ]; then
+            : "${HEALTHPLANET_TOKEN_JSON:?Secret HEALTHPLANET_TOKEN_JSON が未設定です。scripts/setup_github_secrets.sh を実行してください}"
+            printf '%s\n' "$HEALTHPLANET_TOKEN_JSON" > config/tokens/healthplanet_token.json
+            echo "HealthPlanet トークンを Secrets から初期化しました"
+          fi
+
+          # トークン値を念のためログマスクに登録する(公開リポジトリ対策)
+          for f in config/tokens/*.json; do
+            jq -r '[.access_token, .refresh_token] | .[] | select(. != null and . != "")' "$f" \
+              | while IFS= read -r v; do echo "::add-mask::$v"; done
+          done
+
+      - name: 同期を実行
+        env:
+          IN_DATE: ${{ inputs.date }}
+          IN_DAYS: ${{ inputs.days }}
+          IN_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -uo pipefail
+          args=()
+          if [ -n "$IN_DATE" ]; then args+=(--date "$IN_DATE"); fi
+          if [ -n "$IN_DAYS" ]; then args+=(--days "$IN_DAYS"); fi
+          if [ "$IN_DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+
+          # 体重などの数値と URL 中の access_token をマスクして出力する
+          uv run python main.py sync "${args[@]}" 2>&1 \
+            | sed -E \
+                -e 's/[0-9]+(\.[0-9]+)?[[:space:]]*(kg|%)/***\2/g' \
+                -e 's/access_token=[^&[:space:]"]*/access_token=***/g' \
+            | tee sync_output.log
+          rc=${PIPESTATUS[0]}
+
+          {
+            echo "### 同期結果"
+            echo '```'
+            cat sync_output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      # 同期が失敗してもトークンは更新されている可能性があるため、以降は必ず実行する
+      - name: 実行後の状態を暗号化
+        if: always()
+        env:
+          STATE_PASSPHRASE: ${{ secrets.STATE_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${STATE_PASSPHRASE:-}" ]; then
+            echo "STATE_PASSPHRASE が未設定のためスキップします"
+            exit 0
+          fi
+          rm -f state.tar.gz.enc
+          files=()
+          if [ -d config/tokens ]; then files+=(config/tokens); fi
+          if [ -f config/sync_history.db ]; then files+=(config/sync_history.db); fi
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "保存する状態がないためスキップします"
+            exit 0
+          fi
+          tar czf - "${files[@]}" \
+            | openssl enc -aes-256-cbc -pbkdf2 -pass env:STATE_PASSPHRASE -out state.tar.gz.enc
+
+      - name: 状態をキャッシュへ保存
+        if: always() && hashFiles('state.tar.gz.enc') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: state.tar.gz.enc
+          key: sync-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: 最新トークンを Secrets へ書き戻し(GH_PAT 設定時のみ)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "GH_PAT が未設定のため書き戻しをスキップします(状態はキャッシュのみで維持されます)"
+            exit 0
+          fi
+          if [ -f config/tokens/fitbit_token.json ]; then
+            gh secret set FITBIT_TOKEN_JSON --repo "${{ github.repository }}" < config/tokens/fitbit_token.json
+          fi
+          if [ -f config/tokens/healthplanet_token.json ]; then
+            gh secret set HEALTHPLANET_TOKEN_JSON --repo "${{ github.repository }}" < config/tokens/healthplanet_token.json
+          fi
+          echo "最新トークンを Secrets へ書き戻しました"

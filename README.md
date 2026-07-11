@@ -106,7 +106,67 @@ uv run python main.py sync --days 30
 uv run python main.py sync --dry-run
 ```
 
+## スマホから同期を実行する（GitHub Actions）
+
+同期は GitHub Actions の手動実行（workflow_dispatch）としても動かせるため、
+PC を起動していなくてもスマホからキックできる。
+
+### 初回セットアップ（PC で1回だけ）
+
+ローカルでのセットアップ・認証（上記）を済ませたうえで、Secrets をアップロードする。
+
+```bash
+./scripts/setup_github_secrets.sh
+```
+
+設定される Secrets:
+
+| Secret | 内容 |
+|---|---|
+| `CONFIG_YAML` | `config.yaml` の内容 |
+| `FITBIT_TOKEN_JSON` | Fitbit トークン（初回シード用） |
+| `HEALTHPLANET_TOKEN_JSON` | HealthPlanet トークン（初回シード用） |
+| `STATE_PASSPHRASE` | 状態キャッシュ暗号化用パスフレーズ（自動生成） |
+
+### スマホからのキック方法
+
+[GitHub モバイルアプリ](https://github.com/mobile)またはブラウザから、以下の手順でキックする。
+
+1. このリポジトリを開き「Actions」タブへ
+2. ワークフロー「sync」を選ぶ
+3. 「Run workflow」をタップ（日付・日数・ドライランを指定可能）
+
+ブラウザの場合は Actions のページをホーム画面に追加しておくとワンタップで開ける。
+
+### トークンと同期履歴の持ち回り
+
+Fitbit はトークンリフレッシュのたびにリフレッシュトークンが差し替わるため、
+実行後の最新トークンと同期履歴 DB を**暗号化して Actions キャッシュ**に保存し、次回実行時に復元する。
+
+キャッシュは 7 日間使われないと消える。消えた場合は Secrets のトークンにフォールバックするが、
+一度でも CI で同期していると Secrets 側の Fitbit トークンは失効している（ローテーションのため）。
+次のどちらかで運用する。
+
+- **（推奨）fine-grained PAT を Secret `GH_PAT` に設定する**
+  実行のたびに最新トークンが Secrets に書き戻されるため、期間が空いても自動復旧する。
+  [Fine-grained tokens](https://github.com/settings/personal-access-tokens/new) で
+  このリポジトリのみ・Repository permissions → **Secrets: Read and write** を付与して作成し、
+  `gh secret set GH_PAT` で登録する
+- PAT を設定しない場合、7 日以上間隔が空いて同期が失敗するようになったら、
+  ローカルで再認証して `./scripts/setup_github_secrets.sh` を再実行する
+
 ## 注意事項
+
+### GitHub Actions 運用時の注意
+
+- **CI で同期を実行すると、ローカルの Fitbit トークンは失効する**（リフレッシュトークンの
+  ローテーションのため）。以後ローカルでも実行したい場合は `uv run python main.py auth fitbit`
+  で再認証する。CI とローカルの常時併用は想定せず、どちらか一方を主にする
+- このリポジトリは public のため **Actions のログは誰でも見られる**。
+  体重などの数値と認証情報はワークフロー側でマスクしているが、計測日などのメタ情報は
+  ログに残る。気になる場合はリポジトリを private にする
+- 同期履歴 DB もキャッシュで持ち回るため、キャッシュが消えると同じデータを再送する
+  可能性があるが、同じ計測日時・同じ値の再送のため実害はほぼない
 
 ### Fitbit Web API の廃止について
 
@@ -118,10 +178,15 @@ Fitbit レガシー Web API は **2026年9月に廃止予定**。
 
 ```
 healthcare-api-sync/
+├── .github/
+│   └── workflows/
+│       └── sync.yml         # スマホからキックする手動同期ワークフロー
 ├── config/
 │   ├── config.yaml          # 設定ファイル（git 管理外）
 │   ├── config.yaml.example  # 設定ファイルのテンプレート
 │   └── tokens/              # 認証トークン保存先（git 管理外）
+├── scripts/
+│   └── setup_github_secrets.sh  # GitHub Actions 用 Secrets のアップロード
 ├── src/
 │   ├── auth/
 │   │   ├── fitbit_auth.py        # Fitbit OAuth 2.0 + PKCE
