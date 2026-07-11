@@ -138,6 +138,18 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
 
+      # リフレッシュで新しく発行されたトークン値も、後続 step のログに出ないようマスクする
+      # (現状トークンを出力する箇所はないが、将来のデバッグ出力等に備えて安全側に倒す)
+      - name: 更新後のトークンをログマスクへ登録
+        if: always()
+        run: |
+          set -euo pipefail
+          for f in config/tokens/*.json; do
+            [ -f "$f" ] || continue
+            jq -r '[.access_token, .refresh_token] | .[] | select(. != null and . != "")' "$f" \
+              | while IFS= read -r v; do echo "::add-mask::$v"; done
+          done
+
       # 同期が失敗してもトークンは更新されている可能性があるため、以降は必ず実行する
       - name: 実行後の状態を暗号化
         if: always()
