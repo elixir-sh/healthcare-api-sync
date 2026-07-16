@@ -10,8 +10,8 @@ from src.auth.healthplanet_auth import get_access_token
 _INNERSCAN_URL = "https://www.healthplanet.jp/status/innerscan.json"
 
 # tag 番号の定義（HealthPlanet API ドキュメントより）
-_TAG_WEIGHT = "6021"       # 体重 (kg)
-_TAG_BODY_FAT = "6022"     # 体脂肪率 (%)
+_TAG_WEIGHT = "6021"  # 体重 (kg)
+_TAG_BODY_FAT = "6022"  # 体脂肪率 (%)
 _TAG_MUSCLE_MASS = "6023"  # 筋肉量 (kg)
 
 
@@ -44,27 +44,29 @@ def get_innerscan(date_from: Date, date_to: Date) -> list[InnerscanRecord]:
     resp.raise_for_status()
     data = resp.json()
 
-    # 日付ごとにデータをまとめる（同一日は後勝ち・最新時刻を記録）
-    by_date: dict[Date, dict] = {}
-    by_date_dt: dict[Date, datetime] = {}
+    # 計測日時（タグ群が同時に記録された単位）ごとにデータをまとめる
+    by_datetime: dict[datetime, dict] = {}
     for item in data.get("data", []):
-        # date フォーマット: "20240101120000"
-        dt = datetime.strptime(item["date"], "%Y%m%d%H%M%S")
+        # date フォーマット: "202607161047"（秒は含まれない）
+        dt = datetime.strptime(item["date"], "%Y%m%d%H%M")
+        by_datetime.setdefault(dt, {})[item["tag"]] = float(item["keydata"])
+
+    # 日付ごとに最後（最新）の計測日時を採用し、その計測分のタグ値のみを使う
+    # （同日に複数回計測した際、値と時刻が別の計測分から混ざらないようにする）
+    latest_dt_by_date: dict[Date, datetime] = {}
+    for dt in by_datetime:
         d = dt.date()
-        if d not in by_date:
-            by_date[d] = {}
-            by_date_dt[d] = dt
-        by_date[d][item["tag"]] = float(item["keydata"])
-        if dt > by_date_dt[d]:
-            by_date_dt[d] = dt
+        if d not in latest_dt_by_date or dt > latest_dt_by_date[d]:
+            latest_dt_by_date[d] = dt
 
     records = []
-    for d in sorted(by_date):
-        tags = by_date[d]
+    for d in sorted(latest_dt_by_date):
+        dt = latest_dt_by_date[d]
+        tags = by_datetime[dt]
         records.append(
             InnerscanRecord(
                 date=d,
-                measured_at=by_date_dt[d],
+                measured_at=dt,
                 weight_kg=tags.get(_TAG_WEIGHT),
                 body_fat_pct=tags.get(_TAG_BODY_FAT),
                 muscle_mass_kg=tags.get(_TAG_MUSCLE_MASS),
