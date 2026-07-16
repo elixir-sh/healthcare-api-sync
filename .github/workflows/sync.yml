@@ -79,8 +79,11 @@ on:
         default: false
 
 # トークンのリフレッシュ競合を避けるため直列実行にする(実行中のものは止めない)
+# 注意: 呼び出し元ワークフローと同じグループ名にすると、同一 run 内で二重に
+# グループを取得しようとしてデッドロック扱いになり実行されない。
+# 呼び出し元(examples/sync-caller.yml)は group: sync を使うため、ここは別名にする
 concurrency:
-  group: sync
+  group: sync-called
   cancel-in-progress: false
 
 permissions:
