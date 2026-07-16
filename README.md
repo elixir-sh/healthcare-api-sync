@@ -108,17 +108,37 @@ uv run python main.py sync --dry-run
 
 ## GitHub Actions で同期する（定期実行 + 手動実行）
 
-同期は GitHub Actions 上で毎日 15:00（JST）に自動実行される。
-あわせて手動実行（workflow_dispatch）にも対応しているため、PC を起動していなくても
-スマホから任意のタイミングでキックできる。定期実行と手動実行は同じ concurrency
-グループで直列実行されるため、実行タイミングが重なってもトークンリフレッシュが競合しない。
+同期ワークフロー（`.github/workflows/sync.yml`）は **reusable workflow** として公開している。
+実際の実行（毎日 15:00 JST の定期実行と手動実行）は、Secrets とスケジュールを持つ
+**自分の private リポジトリ**からこのワークフローを呼び出して行う。
+
+```
+このリポジトリ（public）        自分のリポジトリ（private）
+  コード + ワークフロー定義  ←──  呼び出しワークフロー + Secrets + schedule
+                                  （実行履歴・ログ・キャッシュもこちらに保存）
+```
+
+このリポジトリは public のため、ここで実行すると Actions の実行履歴やログ
+（実行日時・成否などのメタ情報）が誰でも見られてしまう。個人の運用を private 側に
+分離することでそれを避けつつ、コードは公開のまま誰でも使える状態を保っている。
 
 ### 初回セットアップ（PC で1回だけ）
 
-ローカルでのセットアップ・認証（上記）を済ませたうえで、Secrets をアップロードする。
+ローカルでのセットアップ・認証（上記）を済ませたうえで、以下を行う。
 
 ```bash
-./scripts/setup_github_secrets.sh
+# 1. 実行用の private リポジトリを作成する
+gh repo create <owner>/healthcare-api-sync-runner --private --clone
+
+# 2. 呼び出しワークフローの雛形を配置して push する
+mkdir -p healthcare-api-sync-runner/.github/workflows
+cp examples/sync-caller.yml healthcare-api-sync-runner/.github/workflows/sync.yml
+cd healthcare-api-sync-runner
+git add . && git commit -m "同期ワークフローを追加" && git push
+cd -
+
+# 3. Secrets を private リポジトリへアップロードする
+./scripts/setup_github_secrets.sh --repo <owner>/healthcare-api-sync-runner
 ```
 
 設定される Secrets:
@@ -130,12 +150,19 @@ uv run python main.py sync --dry-run
 | `HEALTHPLANET_TOKEN_JSON` | HealthPlanet トークン（初回シード用） |
 | `STATE_PASSPHRASE` | 状態キャッシュ暗号化用パスフレーズ（自動生成） |
 
+セットアップ後、private リポジトリの Actions → sync → Run workflow を
+`dry_run` にチェックを入れて実行し、動作確認するとよい。
+
+> **fork して使う場合**
+> コードを fork してカスタマイズする場合は、呼び出しワークフローの `uses:` と
+> `code_repository` / `code_ref` を自分の fork に向ける（`examples/sync-caller.yml` 内のコメント参照）。
+
 ### スマホからの手動キック方法
 
 定期実行を待たずに今すぐ同期したい場合は、
 [GitHub モバイルアプリ](https://github.com/mobile)またはブラウザから、以下の手順でキックする。
 
-1. このリポジトリを開き「Actions」タブへ
+1. **private リポジトリ**を開き「Actions」タブへ
 2. ワークフロー「sync」を選ぶ
 3. 「Run workflow」をタップ（日付・日数・ドライランを指定可能）
 
@@ -145,6 +172,7 @@ uv run python main.py sync --dry-run
 
 Fitbit はトークンリフレッシュのたびにリフレッシュトークンが差し替わるため、
 実行後の最新トークンと同期履歴 DB を**暗号化して Actions キャッシュ**に保存し、次回実行時に復元する。
+キャッシュも Secrets も、実行元である **private リポジトリ側**に保存される。
 
 キャッシュは 7 日間使われないと消える。毎日定期実行しているため通常は失効しないが、
 定期実行が止まる等でキャッシュが消えた場合は Secrets のトークンにフォールバックする。
@@ -154,10 +182,11 @@ Fitbit はトークンリフレッシュのたびにリフレッシュトーク�
 - **（推奨）fine-grained PAT を Secret `GH_PAT` に設定する**
   実行のたびに最新トークンが Secrets に書き戻されるため、期間が空いても自動復旧する。
   [Fine-grained tokens](https://github.com/settings/personal-access-tokens/new) で
-  このリポジトリのみ・Repository permissions → **Secrets: Read and write** を付与して作成し、
-  `gh secret set GH_PAT` で登録する
+  **private リポジトリのみ**・Repository permissions → **Secrets: Read and write** を
+  付与して作成し、`gh secret set GH_PAT --repo <owner>/healthcare-api-sync-runner` で登録する
 - PAT を設定しない場合、7 日以上間隔が空いて同期が失敗するようになったら、
-  ローカルで再認証して `./scripts/setup_github_secrets.sh` を再実行する
+  ローカルで再認証して `./scripts/setup_github_secrets.sh --repo <owner>/healthcare-api-sync-runner`
+  を再実行する
 
 ## 注意事項
 
@@ -166,15 +195,17 @@ Fitbit はトークンリフレッシュのたびにリフレッシュトーク�
 - **CI で同期を実行すると、ローカルの Fitbit トークンは失効する**（リフレッシュトークンの
   ローテーションのため）。以後ローカルでも実行したい場合は `uv run python main.py auth fitbit`
   で再認証する。CI とローカルの常時併用は想定せず、どちらか一方を主にする
-- このリポジトリは public のため **Actions のログは誰でも見られる**。
-  体重などの数値と認証情報はワークフロー側でマスクしているが、計測日などのメタ情報は
-  ログに残る。気になる場合はリポジトリを private にする
+- 実行を private リポジトリ側に分離しているため、**実行履歴・ログは非公開**になる。
+  なおワークフローが public リポジトリで実行された場合に備えて、体重などの数値と
+  認証情報のログマスクは維持している
 - 同期履歴 DB もキャッシュで持ち回るため、キャッシュが消えると同じデータを再送する
   可能性があるが、同じ計測日時・同じ値の再送のため実害はほぼない
-- public リポジトリは Actions の実行時間が無料のため、毎日の定期実行によるコストはかからない
+- private リポジトリの Actions は無料枠（個人アカウントは月 2,000 分）を消費するが、
+  この同期は1回数分・1日1回のため十分収まる
 - GitHub の仕様上、**リポジトリに60日間コミット等の操作がないと定期実行（schedule）が
-  自動的に無効化される**。長期間コードを触らない場合は手動実行で代替するか、
-  定期的に何らかのコミットを行う
+  自動的に無効化される**。実行用 private リポジトリはコミットがほぼ発生しないため、
+  雛形ワークフロー（`examples/sync-caller.yml`）には実行のたびに停止タイマーを
+  リセットするキープアライブを組み込んである
 
 ### Fitbit Web API の廃止について
 
@@ -188,13 +219,15 @@ Fitbit レガシー Web API は **2026年9月に廃止予定**。
 healthcare-api-sync/
 ├── .github/
 │   └── workflows/
-│       └── sync.yml         # 毎日15時の定期実行 + 手動実行に対応した同期ワークフロー
+│       └── sync.yml         # 同期ワークフロー（private リポジトリから呼び出す reusable workflow）
 ├── config/
 │   ├── config.yaml          # 設定ファイル（git 管理外）
 │   ├── config.yaml.example  # 設定ファイルのテンプレート
 │   └── tokens/              # 認証トークン保存先（git 管理外）
+├── examples/
+│   └── sync-caller.yml      # private リポジトリに置く呼び出しワークフローの雛形
 ├── scripts/
-│   └── setup_github_secrets.sh  # GitHub Actions 用 Secrets のアップロード
+│   └── setup_github_secrets.sh  # 実行用リポジトリへの Secrets アップロード
 ├── src/
 │   ├── auth/
 │   │   ├── fitbit_auth.py        # Fitbit OAuth 2.0 + PKCE

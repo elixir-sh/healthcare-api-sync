@@ -1,5 +1,9 @@
-# 健康データの同期を「毎日定期実行」と「スマホ(GitHub モバイルアプリ等)からの手動実行」の
-# 両方で行うためのワークフロー
+# 健康データ同期の reusable workflow
+#
+# このリポジトリは public のため、個人の同期はここでは定期実行しない。
+# Secrets と実行スケジュールを持つ private リポジトリから workflow_call で
+# このワークフローを呼び出して実行する(雛形は examples/sync-caller.yml、手順は README)。
+# 実行履歴・ログ・キャッシュ・Secrets はすべて呼び出し元リポジトリ側に保存される。
 #
 # 状態の持ち回り:
 #   - Fitbit はリフレッシュのたびにリフレッシュトークンが差し替わるため、
@@ -9,13 +13,55 @@
 #     (毎日定期実行するため、通常はキャッシュが7日以上放置されず失効しない)
 #
 # ログの取り扱い:
-#   - public リポジトリでログは誰でも見られるため、体重などの数値と認証情報はマスクする
+#   - private リポジトリでの実行を推奨しているが、public リポジトリで実行された場合にも
+#     備えて、体重などの数値と認証情報はマスクする
 name: sync
 
 on:
-  schedule:
-    # 毎日 15:00 JST に自動実行(cron は UTC 基準のため 6時 = 15時-9時間)
-    - cron: "0 6 * * *"
+  workflow_call:
+    inputs:
+      date:
+        description: "同期する日付(YYYY-MM-DD)。省略時は直近N日分"
+        type: string
+        required: false
+        default: ""
+      days:
+        description: "直近何日分を同期するか。省略時は config の default_days"
+        type: string
+        required: false
+        default: ""
+      dry_run:
+        description: "書き込まずに同期対象のみ確認する"
+        type: boolean
+        required: false
+        default: false
+      code_repository:
+        description: "同期コードを checkout するリポジトリ。fork を使う場合に指定する"
+        type: string
+        required: false
+        default: "elixir-sh/healthcare-api-sync"
+      code_ref:
+        description: "checkout するブランチまたはタグ"
+        type: string
+        required: false
+        default: "main"
+    secrets:
+      STATE_PASSPHRASE:
+        description: "状態キャッシュ暗号化用パスフレーズ"
+        required: true
+      CONFIG_YAML:
+        description: "config.yaml の内容"
+        required: true
+      FITBIT_TOKEN_JSON:
+        description: "Fitbit トークン(初回シード用。キャッシュ復元時は未使用)"
+        required: false
+      HEALTHPLANET_TOKEN_JSON:
+        description: "HealthPlanet トークン(初回シード用。キャッシュ復元時は未使用)"
+        required: false
+      GH_PAT:
+        description: "最新トークンを実行リポジトリの Secrets へ書き戻すための fine-grained PAT(任意)"
+        required: false
+  # 動作確認用に手動実行も残す(Secrets が実行リポジトリに設定されている必要がある)
   workflow_dispatch:
     inputs:
       date:
@@ -49,7 +95,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # reusable workflow として呼ばれた場合、デフォルトでは呼び出し元リポジトリが
+      # checkout されてしまうため、同期コードのあるリポジトリを明示する
+      # (workflow_dispatch では inputs.code_* が空になり、自リポジトリ・実行 ref にフォールバック)
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.code_repository || github.repository }}
+          ref: ${{ inputs.code_ref || github.ref }}
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -186,6 +238,8 @@ jobs:
           path: state.tar.gz.enc
           key: sync-state-${{ github.run_id }}-${{ github.run_attempt }}
 
+      # workflow_call 経由でも github.repository は呼び出し元(実行リポジトリ)を指すため、
+      # 書き戻し先は Secrets を保持している実行リポジトリになる
       - name: 最新トークンを Secrets へ書き戻し(GH_PAT 設定時のみ)
         if: always()
         env:
