@@ -54,7 +54,7 @@ jobs:
     secrets:
       STATE_PASSPHRASE: ${{ secrets.STATE_PASSPHRASE }}
       CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
-      FITBIT_TOKEN_JSON: ${{ secrets.FITBIT_TOKEN_JSON }}
+      GOOGLE_HEALTH_TOKEN_JSON: ${{ secrets.GOOGLE_HEALTH_TOKEN_JSON }}
       HEALTHPLANET_TOKEN_JSON: ${{ secrets.HEALTHPLANET_TOKEN_JSON }}
       GH_PAT: ${{ secrets.GH_PAT }}
 

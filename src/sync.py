@@ -1,11 +1,16 @@
 """データ同期のオーケストレーションロジック"""
 
 from dataclasses import dataclass, field
-from datetime import date as Date, time as Time, timedelta
+from datetime import date as Date
+from datetime import datetime, timedelta
 
 from src import storage
-from src.clients import fitbit_client, healthplanet_client
-from src.config import load_config
+from src.clients import google_health_client, healthplanet_client
+
+_SOURCE = "healthplanet"
+_DESTINATION = "google_health"
+# 移行前に Fitbit Web API 経由で書き込んだ記録。Google Health 上の同じデータなので再送しない
+_LEGACY_DESTINATION = "fitbit"
 
 
 @dataclass
@@ -15,6 +20,13 @@ class SyncResult:
     skipped: list[str] = field(default_factory=list)
     succeeded: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
+
+
+def is_synced(d: Date, data_type: str) -> bool:
+    """移行前の Fitbit 経由の記録も含めて、同期済みか判定する"""
+    return storage.is_synced(d, _SOURCE, _DESTINATION, data_type) or storage.is_synced(
+        d, _SOURCE, _LEGACY_DESTINATION, data_type
+    )
 
 
 def sync_range(date_from: Date, date_to: Date) -> list[SyncResult]:
@@ -32,17 +44,17 @@ def sync_range(date_from: Date, date_to: Date) -> list[SyncResult]:
         result = SyncResult(date=current)
         hp = hp_by_date.get(current)
 
-        # --- タニタ体重 → Fitbit ---
+        # --- タニタ体重 → Google Health ---
         if hp and hp.weight_kg is not None:
-            _sync_weight_to_fitbit(current, hp.weight_kg, result, hp.measured_at.time())
+            _sync_weight(current, hp.weight_kg, hp.measured_at, result)
         else:
-            result.skipped.append("HealthPlanet→Fitbit 体重（データなし）")
+            result.skipped.append("HealthPlanet→Google Health 体重（データなし）")
 
-        # --- タニタ体脂肪率 → Fitbit ---
+        # --- タニタ体脂肪率 → Google Health ---
         if hp and hp.body_fat_pct is not None:
-            _sync_body_fat_to_fitbit(current, hp.body_fat_pct, result, hp.measured_at.time())
+            _sync_body_fat(current, hp.body_fat_pct, hp.measured_at, result)
         else:
-            result.skipped.append("HealthPlanet→Fitbit 体脂肪率（データなし）")
+            result.skipped.append("HealthPlanet→Google Health 体脂肪率（データなし）")
 
         results.append(result)
         current += timedelta(days=1)
@@ -50,27 +62,27 @@ def sync_range(date_from: Date, date_to: Date) -> list[SyncResult]:
     return results
 
 
-def _sync_weight_to_fitbit(d: Date, weight_kg: float, result: SyncResult, measured_time: Time | None = None) -> None:
-    label = f"HealthPlanet→Fitbit 体重({weight_kg}kg)"
-    if storage.is_synced(d, "healthplanet", "fitbit", "weight"):
+def _sync_weight(d: Date, weight_kg: float, measured_at: datetime, result: SyncResult) -> None:
+    label = f"HealthPlanet→Google Health 体重({weight_kg}kg)"
+    if is_synced(d, "weight"):
         result.skipped.append(label)
         return
     try:
-        fitbit_client.post_weight(d, weight_kg, measured_time)
-        storage.mark_synced(d, "healthplanet", "fitbit", "weight", weight_kg)
+        google_health_client.post_weight(measured_at, weight_kg)
+        storage.mark_synced(d, _SOURCE, _DESTINATION, "weight", weight_kg)
         result.succeeded.append(label)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 1項目の失敗で他の項目の同期を止めず、結果に記録する
         result.failed.append((label, str(e)))
 
 
-def _sync_body_fat_to_fitbit(d: Date, body_fat_pct: float, result: SyncResult, measured_time: Time | None = None) -> None:
-    label = f"HealthPlanet→Fitbit 体脂肪率({body_fat_pct}%)"
-    if storage.is_synced(d, "healthplanet", "fitbit", "body_fat"):
+def _sync_body_fat(d: Date, body_fat_pct: float, measured_at: datetime, result: SyncResult) -> None:
+    label = f"HealthPlanet→Google Health 体脂肪率({body_fat_pct}%)"
+    if is_synced(d, "body_fat"):
         result.skipped.append(label)
         return
     try:
-        fitbit_client.post_body_fat(d, body_fat_pct, measured_time)
-        storage.mark_synced(d, "healthplanet", "fitbit", "body_fat", body_fat_pct)
+        google_health_client.post_body_fat(measured_at, body_fat_pct)
+        storage.mark_synced(d, _SOURCE, _DESTINATION, "body_fat", body_fat_pct)
         result.succeeded.append(label)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 1項目の失敗で他の項目の同期を止めず、結果に記録する
         result.failed.append((label, str(e)))

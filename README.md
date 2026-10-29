@@ -1,24 +1,26 @@
 # healthcare-api-sync
 
-タニタ HealthPlanet の体組成データを Fitbit に自動同期するローカル CLI ツール。
+タニタ HealthPlanet の体組成データを Google Health に自動同期するローカル CLI ツール。
 
 ## データフロー
 
 ```
 タニタ HealthPlanet
-   ├─→ 体重    ──→ Fitbit
-   └─→ 体脂肪率 ──→ Fitbit
+   ├─→ 体重    ──→ Google Health
+   └─→ 体脂肪率 ──→ Google Health
 ```
 
 > **あすけんへの同期について**  
-> あすけんは Fitbit との公式連携機能を持つため、Fitbit にデータを書き込めば自動で反映されます。
+> あすけんは Fitbit との公式連携機能で体重を取り込む。Google Health API に書き込んだデータが
+> この連携経由であすけんに反映されるかは、移行時点では未確認である。
 
 ## 必要なもの
 
 - Python 3.12 以上
 - [uv](https://docs.astral.sh/uv/)（パッケージ管理）
 - 各サービスのアカウント
-  - [Fitbit](https://www.fitbit.com/)
+  - Google アカウント（Fitbit アカウントを Google アカウントへ移行済みであること）
+  - [Google Cloud](https://console.cloud.google.com/) のプロジェクト
   - [HealthPlanet（タニタ）](https://www.healthplanet.jp/)
 
 ## セットアップ
@@ -31,17 +33,29 @@ uv sync
 
 ### 2. API アプリを登録する
 
-#### Fitbit
+#### Google Health API
 
-1. [Fitbit Developer Console](https://dev.fitbit.com/apps) にアクセス
-2. 「Register an app」をクリックし、以下を入力
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成し、
+   「API とサービス」→「ライブラリ」で **Google Health API** を有効にする
+2. 「Google Auth Platform」で OAuth 同意画面を作成する
 
    | 項目 | 値 |
    |---|---|
-   | OAuth 2.0 Application Type | **Personal** |
-   | Redirect URL | `http://localhost:8080/callback` |
+   | 対象 | 外部 |
+   | データアクセス（スコープ） | `.../auth/googlehealth.health_metrics_and_measurements.writeonly` |
 
-3. 表示された `Client ID` と `Client Secret` を控える
+3. 「対象」で公開ステータスを **本番環境（In production）に公開** する。
+   テスト中（Testing）のままだとリフレッシュトークンが7日で失効し、定期実行が止まる。
+   個人利用（100ユーザー未満）なら審査なしで公開でき、認証時に「Google はこのアプリを確認していません」と
+   表示されるだけで済む
+4. 「クライアント」で OAuth クライアント ID を作成し、以下を入力
+
+   | 項目 | 値 |
+   |---|---|
+   | アプリケーションの種類 | **ウェブ アプリケーション** |
+   | 承認済みのリダイレクト URI | `http://localhost:8080/callback` |
+
+5. 表示された `クライアント ID` と `クライアント シークレット` を控える
 
 #### HealthPlanet
 
@@ -65,9 +79,9 @@ cp config/config.yaml.example config/config.yaml
 `config/config.yaml` を編集し、取得した値を記入する。
 
 ```yaml
-fitbit:
-  client_id: "取得したClient ID"
-  client_secret: "取得したClient Secret"
+google_health:
+  client_id: "取得したクライアント ID"
+  client_secret: "取得したクライアント シークレット"
 
 healthplanet:
   client_id: "取得したClient ID"
@@ -79,8 +93,8 @@ healthplanet:
 初回のみ、各サービスの認証を行う。
 
 ```bash
-uv run python main.py auth fitbit        # ブラウザが開く → Fitbit でログイン・許可
-uv run python main.py auth healthplanet  # ブラウザが開く → HealthPlanet でログイン・許可
+uv run python main.py auth google-health  # ブラウザが開く → Google でログイン・許可
+uv run python main.py auth healthplanet   # ブラウザが開く → HealthPlanet でログイン・許可
 ```
 
 > **HealthPlanet 認証の手順**  
@@ -146,7 +160,7 @@ cd -
 | Secret | 内容 |
 |---|---|
 | `CONFIG_YAML` | `config.yaml` の内容 |
-| `FITBIT_TOKEN_JSON` | Fitbit トークン（初回シード用） |
+| `GOOGLE_HEALTH_TOKEN_JSON` | Google Health トークン（初回シード用） |
 | `HEALTHPLANET_TOKEN_JSON` | HealthPlanet トークン（初回シード用） |
 | `STATE_PASSPHRASE` | 状態キャッシュ暗号化用パスフレーズ（自動生成） |
 
@@ -170,14 +184,14 @@ cd -
 
 ### トークンと同期履歴の持ち回り
 
-Fitbit はトークンリフレッシュのたびにリフレッシュトークンが差し替わるため、
+アクセストークンは1時間で切れ、実行のたびにリフレッシュされる。そこで
 実行後の最新トークンと同期履歴 DB を**暗号化して Actions キャッシュ**に保存し、次回実行時に復元する。
 キャッシュも Secrets も、実行元である **private リポジトリ側**に保存される。
 
 キャッシュは 7 日間使われないと消える。毎日定期実行しているため通常は失効しないが、
 定期実行が止まる等でキャッシュが消えた場合は Secrets のトークンにフォールバックする。
-その場合、一度でも CI で同期していると Secrets 側の Fitbit トークンは失効している
-（ローテーションのため）。次のどちらかで運用する。
+Google のリフレッシュトークンはリフレッシュで差し替わらないため、通常は Secrets のトークンで
+そのまま復旧できる。ただし Google がトークンを失効させた場合に備えて、次のどちらかで運用する。
 
 - **（推奨）fine-grained PAT を Secret `GH_PAT` に設定する**
   実行のたびに最新トークンが Secrets に書き戻されるため、期間が空いても自動復旧する。
@@ -192,14 +206,13 @@ Fitbit はトークンリフレッシュのたびにリフレッシュトーク�
 
 ### GitHub Actions 運用時の注意
 
-- **CI で同期を実行すると、ローカルの Fitbit トークンは失効する**（リフレッシュトークンの
-  ローテーションのため）。以後ローカルでも実行したい場合は `uv run python main.py auth fitbit`
-  で再認証する。CI とローカルの常時併用は想定せず、どちらか一方を主にする
+- CI とローカルの両方で同期すると、それぞれの同期履歴 DB が別になるため、同じデータを
+  二重に書き込むことがある。常時併用は想定せず、どちらか一方を主にする
 - 実行を private リポジトリ側に分離しているため、**実行履歴・ログは非公開**になる。
   なおワークフローが public リポジトリで実行された場合に備えて、体重などの数値と
   認証情報のログマスクは維持している
-- 同期履歴 DB もキャッシュで持ち回るため、キャッシュが消えると同じデータを再送する
-  可能性があるが、同じ計測日時・同じ値の再送のため実害はほぼない
+- 同期履歴 DB もキャッシュで持ち回る。キャッシュが消えると同じデータを再送し、
+  Google Health に同じ計測が二重に記録されることがある
 - private リポジトリの Actions は無料枠（個人アカウントは月 2,000 分）を消費するが、
   この同期は1回数分・1日1回のため十分収まる
 - GitHub の仕様上、**リポジトリに60日間コミット等の操作がないと定期実行（schedule）が
@@ -207,11 +220,20 @@ Fitbit はトークンリフレッシュのたびにリフレッシュトーク�
   雛形ワークフロー（`examples/sync-caller.yml`）には実行のたびに停止タイマーを
   リセットするキープアライブを組み込んである
 
-### Fitbit Web API の廃止について
+### Fitbit Web API からの移行
 
-Fitbit レガシー Web API は **2026年9月に廃止予定**。  
-移行先は [Google Health API](https://developers.google.com/health/migration)。  
-廃止後は `src/clients/fitbit_client.py` を差し替えることで対応できる設計にしている。
+レガシー Fitbit Web API は 2026-09-30 にサポートを終え、2026-11-02 に停止する
+（[移行ガイド](https://developers.google.com/health/migration)）。
+Fitbit のトークンは Google Health API に引き継げないため、以前から使っている場合は次の手順で移行する。
+
+1. 上記「Google Health API」の手順で OAuth クライアントを作り、`config.yaml` の `fitbit` を `google_health` に置き換える
+2. `uv run python main.py auth google-health` で認証する
+3. `./scripts/setup_github_secrets.sh --repo <owner>/healthcare-api-sync-runner` で Secrets を登録し直す。
+   private リポジトリの `.github/workflows/sync.yml` は、`examples/sync-caller.yml` に合わせて
+   `FITBIT_TOKEN_JSON` を `GOOGLE_HEALTH_TOKEN_JSON` に書き換える
+4. 不要になった Secret `FITBIT_TOKEN_JSON` を削除する
+
+Fitbit 経由で同期済みの日は、同期履歴 DB の記録から同期済みとして扱い、再送しない。
 
 ## ファイル構成
 
@@ -230,10 +252,10 @@ healthcare-api-sync/
 │   └── setup_github_secrets.sh  # 実行用リポジトリへの Secrets アップロード
 ├── src/
 │   ├── auth/
-│   │   ├── fitbit_auth.py        # Fitbit OAuth 2.0 + PKCE
+│   │   ├── google_health_auth.py # Google OAuth 2.0 + PKCE
 │   │   └── healthplanet_auth.py  # HealthPlanet OAuth 2.0
 │   ├── clients/
-│   │   ├── fitbit_client.py        # Fitbit API クライアント
+│   │   ├── google_health_client.py # Google Health API クライアント
 │   │   └── healthplanet_client.py  # HealthPlanet API クライアント
 │   ├── config.py   # 設定管理
 │   ├── storage.py  # SQLite による二重書き込み防止

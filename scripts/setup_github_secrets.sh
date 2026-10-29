@@ -38,7 +38,7 @@ require_file() {
 }
 
 require_file config/config.yaml "README のセットアップを先に実施してください"
-require_file config/tokens/fitbit_token.json "「uv run python main.py auth fitbit」で認証してください"
+require_file config/tokens/google_health_token.json "「uv run python main.py auth google-health」で認証してください"
 require_file config/tokens/healthplanet_token.json "「uv run python main.py auth healthplanet」で認証してください"
 
 if [ -z "$repo" ]; then
@@ -47,7 +47,7 @@ fi
 echo "アップロード先: ${repo}"
 
 gh secret set CONFIG_YAML --repo "$repo" < config/config.yaml
-gh secret set FITBIT_TOKEN_JSON --repo "$repo" < config/tokens/fitbit_token.json
+gh secret set GOOGLE_HEALTH_TOKEN_JSON --repo "$repo" < config/tokens/google_health_token.json
 gh secret set HEALTHPLANET_TOKEN_JSON --repo "$repo" < config/tokens/healthplanet_token.json
 
 # 状態キャッシュ暗号化用のパスフレーズ(既存があれば維持し、キャッシュを無効化しない)

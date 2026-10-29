@@ -1,6 +1,6 @@
-# Fitbit Developer Console で取得したクライアント情報
-# https://dev.fitbit.com/apps
-fitbit:
+# Google Cloud Console で作成した OAuth クライアント（ウェブ アプリケーション）の情報
+# https://console.cloud.google.com/apis/credentials
+google_health:
   client_id: ""
   client_secret: ""
   redirect_uri: "http://localhost:8080/callback"
