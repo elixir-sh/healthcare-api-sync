@@ -2,12 +2,13 @@
 
 import sys
 
-if sys.version_info < (3, 10):
+if sys.version_info < (3, 10):  # noqa: UP036 古い Python で起動した際に構文エラーより先に案内を出す
     current_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     print(f"エラー: Python 3.10以上が必要です（現在: {current_version}）", file=sys.stderr)
     sys.exit(1)
 
-from datetime import date as Date, datetime, timedelta
+from datetime import date as Date
+from datetime import datetime, timedelta
 
 import click
 
@@ -18,7 +19,7 @@ from src.config import load_config
 def cli():
     """健康データ集約・同期ツール
 
-    タニタ HealthPlanet の体重データを Fitbit に同期します。
+    タニタ HealthPlanet の体組成データを Google Health に同期します。
     """
 
 
@@ -27,10 +28,10 @@ def auth():
     """各サービスの認証を行います"""
 
 
-@auth.command("fitbit")
-def auth_fitbit():
-    """Fitbit OAuth 2.0 認証（ブラウザが開きます）"""
-    from src.auth.fitbit_auth import authenticate
+@auth.command("google-health")
+def auth_google_health():
+    """Google Health OAuth 2.0 認証（ブラウザが開きます）"""
+    from src.auth.google_health_auth import authenticate
     authenticate()
 
 
@@ -84,16 +85,17 @@ def sync(target_date: str | None, days: int | None, dry_run: bool):
     if dry_run:
         click.echo("（ドライラン: 実際の書き込みは行いません）")
         from src import storage
+        from src.sync import is_synced
         storage.init_db()
         current = date_from
         while current <= date_to:
             click.echo(f"\n📅 {current}")
             checks = [
-                ("HealthPlanet→Fitbit 体重", "healthplanet", "fitbit", "weight"),
-                ("HealthPlanet→Fitbit 体脂肪率", "healthplanet", "fitbit", "body_fat"),
+                ("HealthPlanet→Google Health 体重", "weight"),
+                ("HealthPlanet→Google Health 体脂肪率", "body_fat"),
             ]
-            for label, src, dst, dtype in checks:
-                status = "✅ 同期済み" if storage.is_synced(current, src, dst, dtype) else "⬜ 未同期"
+            for label, dtype in checks:
+                status = "✅ 同期済み" if is_synced(current, dtype) else "⬜ 未同期"
                 click.echo(f"  {status}  {label}")
             current += timedelta(days=1)
         return
@@ -116,7 +118,7 @@ def _print_results(results) -> None:
         for label, reason in r.failed:
             click.echo(f"  ❌ {label}: {reason}")
 
-    click.echo(f"\n--- 同期完了 ---")
+    click.echo("\n--- 同期完了 ---")
     click.echo(f"成功: {total_ok}件  スキップ: {total_skip}件  失敗: {total_fail}件")
 
     if total_fail > 0:

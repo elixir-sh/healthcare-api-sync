@@ -6,8 +6,8 @@
 # 実行履歴・ログ・キャッシュ・Secrets はすべて呼び出し元リポジトリ側に保存される。
 #
 # 状態の持ち回り:
-#   - Fitbit はリフレッシュのたびにリフレッシュトークンが差し替わるため、
-#     実行後のトークンと同期履歴 DB を暗号化して Actions キャッシュに保存し、次回復元する
+#   - トークンはリフレッシュで更新されるため、実行後のトークンと同期履歴 DB を
+#     暗号化して Actions キャッシュに保存し、次回復元する
 #   - キャッシュがない場合(初回・7日以上未実行)は Secrets のトークンで初期化する
 #   - Secret GH_PAT があれば最新トークンを Secrets に書き戻し、キャッシュ失効後も自動復旧できる
 #     (毎日定期実行するため、通常はキャッシュが7日以上放置されず失効しない)
@@ -52,8 +52,8 @@ on:
       CONFIG_YAML:
         description: "config.yaml の内容"
         required: true
-      FITBIT_TOKEN_JSON:
-        description: "Fitbit トークン(初回シード用。キャッシュ復元時は未使用)"
+      GOOGLE_HEALTH_TOKEN_JSON:
+        description: "Google Health トークン(初回シード用。キャッシュ復元時は未使用)"
         required: false
       HEALTHPLANET_TOKEN_JSON:
         description: "HealthPlanet トークン(初回シード用。キャッシュ復元時は未使用)"
@@ -126,7 +126,7 @@ jobs:
         env:
           STATE_PASSPHRASE: ${{ secrets.STATE_PASSPHRASE }}
           CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
-          FITBIT_TOKEN_JSON: ${{ secrets.FITBIT_TOKEN_JSON }}
+          GOOGLE_HEALTH_TOKEN_JSON: ${{ secrets.GOOGLE_HEALTH_TOKEN_JSON }}
           HEALTHPLANET_TOKEN_JSON: ${{ secrets.HEALTHPLANET_TOKEN_JSON }}
         run: |
           set -euo pipefail
@@ -147,10 +147,10 @@ jobs:
             fi
           fi
 
-          if [ ! -f config/tokens/fitbit_token.json ]; then
-            : "${FITBIT_TOKEN_JSON:?Secret FITBIT_TOKEN_JSON が未設定です。scripts/setup_github_secrets.sh を実行してください}"
-            printf '%s\n' "$FITBIT_TOKEN_JSON" > config/tokens/fitbit_token.json
-            echo "Fitbit トークンを Secrets から初期化しました"
+          if [ ! -f config/tokens/google_health_token.json ]; then
+            : "${GOOGLE_HEALTH_TOKEN_JSON:?Secret GOOGLE_HEALTH_TOKEN_JSON が未設定です。scripts/setup_github_secrets.sh を実行してください}"
+            printf '%s\n' "$GOOGLE_HEALTH_TOKEN_JSON" > config/tokens/google_health_token.json
+            echo "Google Health トークンを Secrets から初期化しました"
           fi
           if [ ! -f config/tokens/healthplanet_token.json ]; then
             : "${HEALTHPLANET_TOKEN_JSON:?Secret HEALTHPLANET_TOKEN_JSON が未設定です。scripts/setup_github_secrets.sh を実行してください}"
@@ -253,8 +253,8 @@ jobs:
             echo "GH_PAT が未設定のため書き戻しをスキップします(状態はキャッシュのみで維持されます)"
             exit 0
           fi
-          if [ -f config/tokens/fitbit_token.json ]; then
-            gh secret set FITBIT_TOKEN_JSON --repo "${{ github.repository }}" < config/tokens/fitbit_token.json
+          if [ -f config/tokens/google_health_token.json ]; then
+            gh secret set GOOGLE_HEALTH_TOKEN_JSON --repo "${{ github.repository }}" < config/tokens/google_health_token.json
           fi
           if [ -f config/tokens/healthplanet_token.json ]; then
             gh secret set HEALTHPLANET_TOKEN_JSON --repo "${{ github.repository }}" < config/tokens/healthplanet_token.json
