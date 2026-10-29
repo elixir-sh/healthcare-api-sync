@@ -44,18 +44,26 @@ uv sync
    | 対象 | 外部 |
    | データアクセス（スコープ） | `.../auth/googlehealth.health_metrics_and_measurements.writeonly` |
 
-3. 「対象」で公開ステータスを **本番環境（In production）に公開** する。
+3. 「ブランディング」で、本番公開に必要な項目を入力して保存する
+
+   | 項目 | 値 |
+   |---|---|
+   | アプリケーションのホームページ | `https://github.com/<owner>/healthcare-api-sync` |
+   | アプリケーション プライバシー ポリシー リンク | `https://github.com/<owner>/healthcare-api-sync/blob/main/PRIVACY.md` |
+   | 承認済みドメイン | `github.com` |
+
+4. 「対象」で公開ステータスを **本番環境（In production）に公開** する。
    テスト中（Testing）のままだとリフレッシュトークンが7日で失効し、定期実行が止まる。
    個人利用（100ユーザー未満）なら審査なしで公開でき、認証時に「Google はこのアプリを確認していません」と
    表示されるだけで済む
-4. 「クライアント」で OAuth クライアント ID を作成し、以下を入力
+5. 「クライアント」で OAuth クライアント ID を作成し、以下を入力
 
    | 項目 | 値 |
    |---|---|
    | アプリケーションの種類 | **ウェブ アプリケーション** |
    | 承認済みのリダイレクト URI | `http://localhost:8080/callback` |
 
-5. 表示された `クライアント ID` と `クライアント シークレット` を控える
+6. 表示された `クライアント ID` と `クライアント シークレット` を控える
 
 #### HealthPlanet
 
@@ -260,6 +268,7 @@ healthcare-api-sync/
 │   ├── config.py   # 設定管理
 │   ├── storage.py  # SQLite による二重書き込み防止
 │   └── sync.py     # 同期ロジック
+├── PRIVACY.md       # プライバシーポリシー（OAuth 同意画面から参照）
 ├── main.py          # CLI エントリポイント
 ├── pyproject.toml   # uv プロジェクト設定・依存関係定義
 └── uv.lock          # 依存関係のロックファイル
