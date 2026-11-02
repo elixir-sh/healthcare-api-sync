@@ -49,6 +49,10 @@ echo "アップロード先: ${repo}"
 gh secret set CONFIG_YAML --repo "$repo" < config/config.yaml
 gh secret set GOOGLE_HEALTH_TOKEN_JSON --repo "$repo" < config/tokens/google_health_token.json
 gh secret set HEALTHPLANET_TOKEN_JSON --repo "$repo" < config/tokens/healthplanet_token.json
+# Notion の OAuth は任意のため、認証済みのときだけ登録する
+if [ -f config/tokens/notion_token.json ]; then
+  gh secret set NOTION_TOKEN_JSON --repo "$repo" < config/tokens/notion_token.json
+fi
 
 # 状態キャッシュ暗号化用のパスフレーズ(既存があれば維持し、キャッシュを無効化しない)
 # 一覧取得の失敗時はここで止める(誤って再生成すると既存キャッシュを読めなくするため)

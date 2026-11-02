@@ -1,14 +1,18 @@
 # healthcare-api-sync
 
 タニタ HealthPlanet の体組成データを Google Health に自動同期するローカル CLI ツール。
+設定すれば、同じ体重と体脂肪率を Notion のデータベースにも書き込む。
 
 ## データフロー
 
 ```
 タニタ HealthPlanet
-   ├─→ 体重    ──→ Google Health
-   └─→ 体脂肪率 ──→ Google Health
+   ├─→ 体重    ──→ Google Health、Notion(任意)
+   └─→ 体脂肪率 ──→ Google Health、Notion(任意)
 ```
+
+Google Health と Notion への書き込みは独立しており、片方が失敗してももう片方は続ける。
+失敗した分は同期済みとして記録しないため、次回の実行で再送される。
 
 > **あすけんへの同期について**  
 > あすけんは Fitbit との公式連携機能で体重を取り込む。Google Health API に書き込んだデータが
@@ -22,6 +26,7 @@
   - Google アカウント（Fitbit アカウントを Google アカウントへ移行済みであること）
   - [Google Cloud](https://console.cloud.google.com/) のプロジェクト
   - [HealthPlanet（タニタ）](https://www.healthplanet.jp/)
+  - [Notion](https://www.notion.so/)（Notion にも書き込む場合のみ）
 
 ## セットアップ
 
@@ -78,6 +83,34 @@ uv sync
 
 3. 表示された `Client ID` と `Client Secret` を控える
 
+#### Notion（任意）
+
+Notion に書き込む場合は、書き込み先のデータベースを次のプロパティで用意する。
+名前と型が一致しないと書き込みに失敗する。
+
+| プロパティ | 型 | 内容 |
+|---|---|---|
+| 名前 | タイトル | 測定日（YYYY-MM-DD） |
+| 日付 | 日付 | 測定日（日本時間） |
+| 体重 | 数値 | kg |
+| 体脂肪率 | 数値 | % |
+
+Notion の認証は次の2つから選ぶ。ワークスペースのオーナーなら A が簡単で、
+オーナーでない場合は内部インテグレーションを作れないため B を使う。
+どちらも、機能は「コンテンツを読み取る」「コンテンツを更新」「コンテンツを挿入」を有効にし、
+ユーザー情報は「ユーザー情報なし」でよい。
+
+- **A. 内部インテグレーション**:
+  [インテグレーションの管理画面](https://www.notion.so/profile/integrations) で作成し、
+  表示されたトークンを控える。書き込み先データベースの「…」→「接続」で、作成したインテグレーションを追加する
+- **B. OAuth（公開コネクト）**: 同じ管理画面で、認証方法に OAuth を選んでコネクトを作成する。
+  リダイレクト URI は `http://localhost:8080/callback`、インストール可能なワークスペースは書き込み先の
+  ワークスペースにする。表示されたクライアント ID とクライアントシークレットを控える。
+  データベースへのアクセスは、後の `auth notion` で許可する
+
+最後に、データベースの「…」→「データソースを管理」から、データソースの「…」→「データソース ID をコピー」で
+data source ID を控える（データベース ID とは別の値）。
+
 ### 3. 設定ファイルを作成する
 
 ```bash
@@ -94,6 +127,14 @@ google_health:
 healthplanet:
   client_id: "取得したClient ID"
   client_secret: "取得したClient Secret"
+
+# Notion に書き込む場合のみ。すべて空なら Notion への書き込みを飛ばす
+notion:
+  weight_data_source_id: "取得した data source ID"
+  token: "A で取得したトークン"           # A の場合
+  client_id: "B で取得したクライアント ID"  # B の場合
+  client_secret: "B で取得したクライアント シークレット"
+  redirect_uri: "http://localhost:8080/callback"
 ```
 
 ### 4. 認証する
@@ -103,7 +144,11 @@ healthplanet:
 ```bash
 uv run python main.py auth google-health  # ブラウザが開く → Google でログイン・許可
 uv run python main.py auth healthplanet   # ブラウザが開く → HealthPlanet でログイン・許可
+uv run python main.py auth notion         # Notion を OAuth（B）で使う場合のみ
 ```
+
+`auth notion` ではブラウザで Notion が開き、アクセスを許可するページを選ぶ画面になる。
+ここで書き込み先のデータベースだけを選ぶと、このツールが触れる範囲をそのデータベースに限れる。
 
 > **HealthPlanet 認証の手順**  
 > HealthPlanet は外部コールバック URL を受け付けないため、認証後に表示される  
@@ -167,13 +212,24 @@ cd -
 
 | Secret | 内容 |
 |---|---|
-| `CONFIG_YAML` | `config.yaml` の内容 |
+| `CONFIG_YAML` | `config.yaml` の内容（Notion の設定もここに含まれる） |
 | `GOOGLE_HEALTH_TOKEN_JSON` | Google Health トークン（初回シード用） |
 | `HEALTHPLANET_TOKEN_JSON` | HealthPlanet トークン（初回シード用） |
+| `NOTION_TOKEN_JSON` | Notion トークン（OAuth で認証した場合のみ。初回シード用） |
 | `STATE_PASSPHRASE` | 状態キャッシュ暗号化用パスフレーズ（自動生成） |
 
 セットアップ後、private リポジトリの Actions → sync → Run workflow を
 `dry_run` にチェックを入れて実行し、動作確認するとよい。
+
+後から Notion への書き込みを足すときは、ローカルの `config.yaml` に `notion` を書き足し
+（OAuth なら `auth notion` も済ませ）、同じスクリプトを再実行して Secrets を更新する。
+OAuth で使う場合は、呼び出しワークフローが `NOTION_TOKEN_JSON` を渡しているかを
+`examples/sync-caller.yml` と見比べて確かめる。
+
+Notion の OAuth トークンは、更新するたびにリフレッシュトークンも新しくなる。
+キャッシュが消えたときに Secrets に古いトークンしか残っていないと再認証が必要になるため、
+OAuth で使う場合は後述の `GH_PAT` を設定しておくとよい。再認証したときは同じスクリプトを再実行すれば、
+キャッシュより新しいトークンとして Secret のほうが使われる。
 
 > **fork して使う場合**
 > コードを fork してカスタマイズする場合は、呼び出しワークフローの `uses:` と
@@ -220,7 +276,8 @@ Google のリフレッシュトークンはリフレッシュで差し替わら�
   なおワークフローが public リポジトリで実行された場合に備えて、体重などの数値と
   認証情報のログマスクは維持している
 - 同期履歴 DB もキャッシュで持ち回る。キャッシュが消えると同じデータを再送し、
-  Google Health に同じ計測が二重に記録されることがある
+  Google Health に同じ計測が二重に記録されることがある。Notion は書き込む前に同じ測定日のページを探し、
+  あれば新しく作らずに更新するため、二重には記録されない
 - private リポジトリの Actions は無料枠（個人アカウントは月 2,000 分）を消費するが、
   この同期は1回数分・1日1回のため十分収まる
 - GitHub の仕様上、**リポジトリに60日間コミット等の操作がないと定期実行（schedule）が
@@ -260,11 +317,14 @@ healthcare-api-sync/
 │   └── setup_github_secrets.sh  # 実行用リポジトリへの Secrets アップロード
 ├── src/
 │   ├── auth/
+│   │   ├── callback_server.py    # OAuth のコールバックを受けるローカルサーバー
 │   │   ├── google_health_auth.py # Google OAuth 2.0 + PKCE
-│   │   └── healthplanet_auth.py  # HealthPlanet OAuth 2.0
+│   │   ├── healthplanet_auth.py  # HealthPlanet OAuth 2.0
+│   │   └── notion_auth.py        # Notion OAuth 2.0
 │   ├── clients/
 │   │   ├── google_health_client.py # Google Health API クライアント
-│   │   └── healthplanet_client.py  # HealthPlanet API クライアント
+│   │   ├── healthplanet_client.py  # HealthPlanet API クライアント
+│   │   └── notion_client.py        # Notion API クライアント（体重データベースへの書き込み）
 │   ├── config.py   # 設定管理
 │   ├── storage.py  # SQLite による二重書き込み防止
 │   └── sync.py     # 同期ロジック

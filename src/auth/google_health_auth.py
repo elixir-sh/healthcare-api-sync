@@ -4,14 +4,13 @@ import base64
 import hashlib
 import json
 import secrets
-import time
 import webbrowser
 from datetime import UTC, datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import urlencode, urlparse
 
 import requests
 
+from src.auth.callback_server import wait_for_callback
 from src.config import get_token_path, load_config
 
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -27,56 +26,6 @@ def _generate_pkce_pair() -> tuple[str, str]:
     digest = hashlib.sha256(verifier.encode()).digest()
     challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
     return verifier, challenge
-
-
-class _CallbackHandler(BaseHTTPRequestHandler):
-    """OAuth コールバックを受け取るHTTPハンドラ"""
-
-    auth_code: str | None = None
-    state: str | None = None
-    error: str | None = None
-
-    def do_GET(self):
-        params = parse_qs(urlparse(self.path).query)
-        if "code" in params:
-            _CallbackHandler.auth_code = params["code"][0]
-            _CallbackHandler.state = params.get("state", [None])[0]
-            body = "認証成功。このタブを閉じてください。".encode()
-        else:
-            _CallbackHandler.error = params.get("error", ["unknown"])[0]
-            body = "認証エラー。".encode()
-        body = b"<html><body><p>" + body + b"</p></body></html>"
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args):
-        pass  # 標準ログを抑制
-
-
-def _wait_for_callback(host: str, port: int, expected_state: str, timeout: int = 180) -> str:
-    """ローカルHTTPサーバーでコールバックを待ち受け、認可コードを返す"""
-    _CallbackHandler.auth_code = None
-    _CallbackHandler.state = None
-    _CallbackHandler.error = None
-    server = HTTPServer((host, port), _CallbackHandler)
-    server.timeout = 1
-
-    try:
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            server.handle_request()
-            if _CallbackHandler.auth_code:
-                if _CallbackHandler.state != expected_state:
-                    raise RuntimeError("Google 認証エラー: state が一致しません")
-                return _CallbackHandler.auth_code
-            if _CallbackHandler.error:
-                raise RuntimeError(f"Google 認証エラー: {_CallbackHandler.error}")
-    finally:
-        server.server_close()
-
-    raise TimeoutError("Google 認証がタイムアウトしました")
 
 
 def _exchange_code_for_token(code: str, verifier: str, config: dict) -> dict:
@@ -176,7 +125,9 @@ def authenticate() -> None:
     print(f"開かない場合は次の URL をブラウザで開いてください:\n{url}")
     webbrowser.open(url)
 
-    code = _wait_for_callback(redirect.hostname or "localhost", redirect.port or 8080, state)
+    code = wait_for_callback(
+        "Google", redirect.hostname or "localhost", redirect.port or 8080, state
+    )
     token = _exchange_code_for_token(code, verifier, cfg)
     _save_token(token)
     print("Google Health 認証完了。トークンを保存しました。")

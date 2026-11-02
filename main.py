@@ -19,7 +19,7 @@ from src.config import load_config
 def cli():
     """健康データ集約・同期ツール
 
-    タニタ HealthPlanet の体組成データを Google Health に同期します。
+    タニタ HealthPlanet の体組成データを Google Health(設定時は Notion にも)に同期します。
     """
 
 
@@ -32,6 +32,13 @@ def auth():
 def auth_google_health():
     """Google Health OAuth 2.0 認証（ブラウザが開きます）"""
     from src.auth.google_health_auth import authenticate
+    authenticate()
+
+
+@auth.command("notion")
+def auth_notion():
+    """Notion OAuth 2.0 認証（ブラウザが開きます）"""
+    from src.auth.notion_auth import authenticate
     authenticate()
 
 
@@ -85,17 +92,26 @@ def sync(target_date: str | None, days: int | None, dry_run: bool):
     if dry_run:
         click.echo("（ドライラン: 実際の書き込みは行いません）")
         from src import storage
-        from src.sync import is_synced
+        from src.clients import notion_client
+        from src.sync import is_synced, is_synced_to_notion
         storage.init_db()
+        checks = [
+            ("HealthPlanet→Google Health 体重", is_synced, "weight"),
+            ("HealthPlanet→Google Health 体脂肪率", is_synced, "body_fat"),
+        ]
+        if notion_client.is_configured():
+            checks += [
+                ("HealthPlanet→Notion 体重", is_synced_to_notion, "weight"),
+                ("HealthPlanet→Notion 体脂肪率", is_synced_to_notion, "body_fat"),
+            ]
+            problem = notion_client.config_problem()
+            if problem:
+                click.echo(f"⚠️ Notion への書き込みは失敗します: {problem}")
         current = date_from
         while current <= date_to:
             click.echo(f"\n📅 {current}")
-            checks = [
-                ("HealthPlanet→Google Health 体重", "weight"),
-                ("HealthPlanet→Google Health 体脂肪率", "body_fat"),
-            ]
-            for label, dtype in checks:
-                status = "✅ 同期済み" if is_synced(current, dtype) else "⬜ 未同期"
+            for label, synced, dtype in checks:
+                status = "✅ 同期済み" if synced(current, dtype) else "⬜ 未同期"
                 click.echo(f"  {status}  {label}")
             current += timedelta(days=1)
         return
