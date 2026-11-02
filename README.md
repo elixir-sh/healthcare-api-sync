@@ -95,12 +95,21 @@ Notion に書き込む場合は、書き込み先のデータベースを次の�
 | 体重 | 数値 | kg |
 | 体脂肪率 | 数値 | % |
 
-1. [インテグレーションの管理画面](https://www.notion.so/profile/integrations) で
-   内部インテグレーションを作成する。機能は「コンテンツを読み取る」「コンテンツを更新」「コンテンツを挿入」を有効にする
-2. 表示された内部インテグレーションシークレット（トークン）を控える
-3. 書き込み先データベースのページ右上の「…」→「接続」から、作成したインテグレーションを追加する
-4. データベースの「…」→「データソースを管理」から、データソースの「…」→「データソース ID をコピー」で
-   data source ID を控える（データベース ID とは別の値）
+Notion の認証は次の2つから選ぶ。ワークスペースのオーナーなら A が簡単で、
+オーナーでない場合は内部インテグレーションを作れないため B を使う。
+どちらも、機能は「コンテンツを読み取る」「コンテンツを更新」「コンテンツを挿入」を有効にし、
+ユーザー情報は「ユーザー情報なし」でよい。
+
+- **A. 内部インテグレーション**:
+  [インテグレーションの管理画面](https://www.notion.so/profile/integrations) で作成し、
+  表示されたトークンを控える。書き込み先データベースの「…」→「接続」で、作成したインテグレーションを追加する
+- **B. OAuth（公開コネクト）**: 同じ管理画面で、認証方法に OAuth を選んでコネクトを作成する。
+  リダイレクト URI は `http://localhost:8080/callback`、インストール可能なワークスペースは書き込み先の
+  ワークスペースにする。表示されたクライアント ID とクライアントシークレットを控える。
+  データベースへのアクセスは、後の `auth notion` で許可する
+
+最後に、データベースの「…」→「データソースを管理」から、データソースの「…」→「データソース ID をコピー」で
+data source ID を控える（データベース ID とは別の値）。
 
 ### 3. 設定ファイルを作成する
 
@@ -119,10 +128,12 @@ healthplanet:
   client_id: "取得したClient ID"
   client_secret: "取得したClient Secret"
 
-# Notion に書き込む場合のみ。両方とも空なら Notion への書き込みを飛ばす
+# Notion に書き込む場合のみ。すべて空なら Notion への書き込みを飛ばす
 notion:
-  token: "取得したトークン"
   weight_data_source_id: "取得した data source ID"
+  token: "A で取得したトークン"           # A の場合
+  client_id: "B で取得したクライアント ID"  # B の場合
+  client_secret: "B で取得したクライアント シークレット"
 ```
 
 ### 4. 認証する
@@ -132,7 +143,11 @@ notion:
 ```bash
 uv run python main.py auth google-health  # ブラウザが開く → Google でログイン・許可
 uv run python main.py auth healthplanet   # ブラウザが開く → HealthPlanet でログイン・許可
+uv run python main.py auth notion         # Notion を OAuth（B）で使う場合のみ
 ```
+
+`auth notion` ではブラウザで Notion が開き、アクセスを許可するページを選ぶ画面になる。
+ここで書き込み先のデータベースだけを選ぶと、このツールが触れる範囲をそのデータベースに限れる。
 
 > **HealthPlanet 認証の手順**  
 > HealthPlanet は外部コールバック URL を受け付けないため、認証後に表示される  
@@ -196,16 +211,23 @@ cd -
 
 | Secret | 内容 |
 |---|---|
-| `CONFIG_YAML` | `config.yaml` の内容（Notion のトークンと data source ID もここに含まれる） |
+| `CONFIG_YAML` | `config.yaml` の内容（Notion の設定もここに含まれる） |
 | `GOOGLE_HEALTH_TOKEN_JSON` | Google Health トークン（初回シード用） |
 | `HEALTHPLANET_TOKEN_JSON` | HealthPlanet トークン（初回シード用） |
+| `NOTION_TOKEN_JSON` | Notion トークン（OAuth で認証した場合のみ。初回シード用） |
 | `STATE_PASSPHRASE` | 状態キャッシュ暗号化用パスフレーズ（自動生成） |
 
 セットアップ後、private リポジトリの Actions → sync → Run workflow を
 `dry_run` にチェックを入れて実行し、動作確認するとよい。
 
-後から Notion への書き込みを足すときは、ローカルの `config.yaml` に `notion` を書き足し、
-同じスクリプトを再実行して `CONFIG_YAML` を更新する。呼び出しワークフローの変更は要らない。
+後から Notion への書き込みを足すときは、ローカルの `config.yaml` に `notion` を書き足し
+（OAuth なら `auth notion` も済ませ）、同じスクリプトを再実行して Secrets を更新する。
+OAuth で使う場合は、呼び出しワークフローが `NOTION_TOKEN_JSON` を渡しているかを
+`examples/sync-caller.yml` と見比べて確かめる。
+
+Notion の OAuth トークンは、更新するたびにリフレッシュトークンも新しくなる。
+キャッシュが消えたときに Secrets に古いトークンしか残っていないと再認証が必要になるため、
+OAuth で使う場合は後述の `GH_PAT` を設定しておくとよい。
 
 > **fork して使う場合**
 > コードを fork してカスタマイズする場合は、呼び出しワークフローの `uses:` と
@@ -293,8 +315,10 @@ healthcare-api-sync/
 │   └── setup_github_secrets.sh  # 実行用リポジトリへの Secrets アップロード
 ├── src/
 │   ├── auth/
+│   │   ├── callback_server.py    # OAuth のコールバックを受けるローカルサーバー
 │   │   ├── google_health_auth.py # Google OAuth 2.0 + PKCE
-│   │   └── healthplanet_auth.py  # HealthPlanet OAuth 2.0
+│   │   ├── healthplanet_auth.py  # HealthPlanet OAuth 2.0
+│   │   └── notion_auth.py        # Notion OAuth 2.0
 │   ├── clients/
 │   │   ├── google_health_client.py # Google Health API クライアント
 │   │   ├── healthplanet_client.py  # HealthPlanet API クライアント

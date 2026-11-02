@@ -12,12 +12,16 @@ healthplanet:
   client_secret: ""
   redirect_uri: "http://localhost:8080/callback"
 
-# Notion の体重データベース（任意。両方とも空なら Notion への書き込みを飛ばす）
-# https://www.notion.so/profile/integrations で作ったインテグレーションのトークンと、
-# 書き込み先データベースの data source ID を記入する（README 参照）
+# Notion の体重データベース（任意。すべて空なら Notion への書き込みを飛ばす）
+# 認証は token（内部インテグレーション）か client_id / client_secret（OAuth）のどちらかを記入する（README 参照）
 notion:
-  token: ""
   weight_data_source_id: ""
+  # 内部インテグレーションのトークン。記入すると OAuth より優先する
+  token: ""
+  # OAuth のコネクト。記入後に `uv run python main.py auth notion` で認証する
+  client_id: ""
+  client_secret: ""
+  redirect_uri: "http://localhost:8080/callback"
 
 # 同期設定
 sync:

@@ -35,6 +35,13 @@ def auth_google_health():
     authenticate()
 
 
+@auth.command("notion")
+def auth_notion():
+    """Notion OAuth 2.0 認証（ブラウザが開きます）"""
+    from src.auth.notion_auth import authenticate
+    authenticate()
+
+
 @auth.command("healthplanet")
 def auth_healthplanet():
     """HealthPlanet OAuth 2.0 認証（ブラウザが開きます）"""
