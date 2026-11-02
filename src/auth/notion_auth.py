@@ -20,6 +20,7 @@ _AUTH_URL = "https://api.notion.com/v1/oauth/authorize"
 _TOKEN_URL = "https://api.notion.com/v1/oauth/token"
 _TOKEN_NAME = "notion"
 NOTION_VERSION = "2025-09-03"
+_DEFAULT_REDIRECT_URI = "http://localhost:8080/callback"
 
 # トークン応答のうち保存する項目。owner(認証したユーザーの情報)は使わないので保存しない
 _SAVED_FIELDS = ("access_token", "refresh_token", "bot_id", "workspace_id", "workspace_name")
@@ -69,14 +70,16 @@ def _load_token() -> dict | None:
 def authenticate() -> None:
     """ブラウザを開いて Notion の OAuth フローを実行し、トークンを保存する"""
     cfg = load_config()["notion"]
-    redirect = urlparse(cfg["redirect_uri"])
+    # 既存の config.yaml に notion を書き足した場合に備えて、雛形と同じ値を既定にする
+    redirect_uri = cfg.get("redirect_uri") or _DEFAULT_REDIRECT_URI
+    redirect = urlparse(redirect_uri)
     state = secrets.token_urlsafe(16)
 
     params = {
         "client_id": cfg["client_id"],
         "response_type": "code",
         "owner": "user",
-        "redirect_uri": cfg["redirect_uri"],
+        "redirect_uri": redirect_uri,
         "state": state,
     }
     url = f"{_AUTH_URL}?{urlencode(params)}"
@@ -91,7 +94,7 @@ def authenticate() -> None:
     )
     token = _post_token(
         cfg,
-        {"grant_type": "authorization_code", "code": code, "redirect_uri": cfg["redirect_uri"]},
+        {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
     )
     _save_token(token)
     print(f"Notion 認証完了({token['workspace_name']})。トークンを保存しました。")

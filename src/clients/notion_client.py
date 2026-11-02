@@ -36,7 +36,7 @@ def _settings() -> _Settings | None:
     client_id = notion.get("client_id") or ""
     client_secret = notion.get("client_secret") or ""
     data_source_id = notion.get("weight_data_source_id") or ""
-    if not (token or client_id or data_source_id):
+    if not (token or client_id or client_secret or data_source_id):
         return None
     # 一部だけの設定は記入漏れとみなし、黙って飛ばさずに失敗として結果に出す
     if not data_source_id:
