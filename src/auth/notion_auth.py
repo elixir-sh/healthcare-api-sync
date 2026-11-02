@@ -25,6 +25,9 @@ _DEFAULT_REDIRECT_URI = "http://localhost:8080/callback"
 # トークン応答のうち保存する項目。owner(認証したユーザーの情報)は使わないので保存しない
 _SAVED_FIELDS = ("access_token", "refresh_token", "bot_id", "workspace_id", "workspace_name")
 
+# 更新に失敗したリフレッシュトークンとその理由。同じトークンでは同期中の各日で更新を試み直さない
+_failed_refresh: tuple[str, str] | None = None
+
 
 def _error_code(resp: requests.Response) -> str | None:
     try:
@@ -100,6 +103,11 @@ def authenticate() -> None:
     print(f"Notion 認証完了({token['workspace_name']})。トークンを保存しました。")
 
 
+def has_token() -> bool:
+    """auth notion で保存したトークンがあるか"""
+    return get_token_path(_TOKEN_NAME).exists()
+
+
 def get_access_token() -> str:
     """保存済みのアクセストークンを返す"""
     token = _load_token()
@@ -121,10 +129,17 @@ def refresh_access_token() -> str:
         raise RuntimeError(
             "Notion のトークンを更新できません。`python main.py auth notion` で再認証してください。"
         )
+    global _failed_refresh
+    if _failed_refresh and _failed_refresh[0] == token["refresh_token"]:
+        raise RuntimeError(_failed_refresh[1])
     cfg = load_config()["notion"]
-    new_token = _post_token(
-        cfg, {"grant_type": "refresh_token", "refresh_token": token["refresh_token"]}
-    )
+    try:
+        new_token = _post_token(
+            cfg, {"grant_type": "refresh_token", "refresh_token": token["refresh_token"]}
+        )
+    except RuntimeError as e:
+        _failed_refresh = (token["refresh_token"], str(e))
+        raise
     # リフレッシュトークンが返らない場合に備えて、既存の値を引き継ぐ
     if not new_token.get("refresh_token"):
         new_token["refresh_token"] = token["refresh_token"]

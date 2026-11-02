@@ -5,6 +5,7 @@ https://developers.notion.com/reference/post-page
 https://developers.notion.com/reference/query-a-data-source
 """
 
+import time
 from dataclasses import dataclass
 from datetime import date as Date
 
@@ -14,6 +15,10 @@ from src.auth import notion_auth
 from src.config import load_config
 
 _BASE_URL = "https://api.notion.com/v1"
+# レート制限(429)を受けたときの再試行回数と、Retry-After がない場合の待ち時間(秒)
+_MAX_RETRIES = 3
+_DEFAULT_RETRY_AFTER = 1.0
+_MAX_RETRY_AFTER = 30.0
 
 # 書き込み先データベースのプロパティ名。作成済みのデータベースに合わせる
 _PROP_TITLE = "名前"
@@ -48,6 +53,20 @@ def _settings() -> _Settings | None:
     return _Settings(data_source_id=data_source_id, static_token=token)
 
 
+def config_problem() -> str | None:
+    """Notion の設定のうち、書き込みが必ず失敗する問題を返す。問題がなければ None
+
+    dry-run では Notion に接続しないため、設定の記入漏れと未認証だけでも先に知らせる。
+    """
+    try:
+        settings = _settings()
+    except ValueError as e:
+        return str(e)
+    if settings and not settings.static_token and not notion_auth.has_token():
+        return "Notion 認証が必要です。`python main.py auth notion` を実行してください。"
+    return None
+
+
 def is_configured() -> bool:
     """Notion への書き込みが設定されているか（一部だけの設定も True とし、書き込み時に失敗させる）"""
     try:
@@ -56,17 +75,32 @@ def is_configured() -> bool:
         return True
 
 
+def _retry_after(resp: requests.Response) -> float:
+    try:
+        seconds = float(resp.headers.get("Retry-After", _DEFAULT_RETRY_AFTER))
+    except ValueError:
+        seconds = _DEFAULT_RETRY_AFTER
+    return min(max(seconds, 0.0), _MAX_RETRY_AFTER)
+
+
 def _send(method: str, path: str, token: str, body: dict) -> requests.Response:
-    return requests.request(
-        method,
-        f"{_BASE_URL}{path}",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Notion-Version": notion_auth.NOTION_VERSION,
-        },
-        json=body,
-        timeout=30,
-    )
+    """リクエストを送る。レート制限を受けたら Retry-After だけ待って再試行する"""
+    retries = 0
+    while True:
+        resp = requests.request(
+            method,
+            f"{_BASE_URL}{path}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Notion-Version": notion_auth.NOTION_VERSION,
+            },
+            json=body,
+            timeout=30,
+        )
+        if resp.status_code != 429 or retries >= _MAX_RETRIES:
+            return resp
+        retries += 1
+        time.sleep(_retry_after(resp))
 
 
 def _request(method: str, path: str, settings: _Settings, body: dict) -> dict:

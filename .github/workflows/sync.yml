@@ -162,18 +162,28 @@ jobs:
             echo "HealthPlanet トークンを Secrets から初期化しました"
           fi
           # Notion は任意のため、Secret がなければ初期化しない。
-          # 更新のたびに古いトークンが使えなくなるので、再認証して登録し直した Secret が
-          # キャッシュより新しければ(obtained_at で比較)、キャッシュより Secret を優先する
+          # 壊れたトークンで jq が失敗すると、この step ごと落ちて Google Health の同期まで止まるため、
+          # 読めないものは警告して使わない(同期では Notion だけが失敗扱いになる)
+          notion_token=config/tokens/notion_token.json
+          if [ -f "$notion_token" ] && ! jq -e 'type == "object"' "$notion_token" > /dev/null 2>&1; then
+            echo "::warning::キャッシュの Notion トークンを読めないため破棄します"
+            rm -f "$notion_token"
+          fi
           if [ -n "${NOTION_TOKEN_JSON:-}" ]; then
-            notion_token=config/tokens/notion_token.json
-            secret_at=$(jq -r '.obtained_at // ""' <<< "$NOTION_TOKEN_JSON")
-            cached_at=""
-            if [ -f "$notion_token" ]; then
-              cached_at=$(jq -r '.obtained_at // ""' "$notion_token")
-            fi
-            if [ ! -f "$notion_token" ] || [[ "$secret_at" > "$cached_at" ]]; then
-              printf '%s\n' "$NOTION_TOKEN_JSON" > "$notion_token"
-              echo "Notion トークンを Secrets から初期化しました"
+            if ! jq -e 'type == "object"' <<< "$NOTION_TOKEN_JSON" > /dev/null 2>&1; then
+              echo "::warning::Secret NOTION_TOKEN_JSON を JSON として読めないため使いません"
+            else
+              # 更新のたびに古いトークンが使えなくなるので、再認証して登録し直した Secret が
+              # キャッシュより新しければ(obtained_at で比較)、キャッシュより Secret を優先する
+              secret_at=$(jq -r '.obtained_at // ""' <<< "$NOTION_TOKEN_JSON")
+              cached_at=""
+              if [ -f "$notion_token" ]; then
+                cached_at=$(jq -r '.obtained_at // ""' "$notion_token")
+              fi
+              if [ ! -f "$notion_token" ] || [[ "$secret_at" > "$cached_at" ]]; then
+                printf '%s\n' "$NOTION_TOKEN_JSON" > "$notion_token"
+                echo "Notion トークンを Secrets から初期化しました"
+              fi
             fi
           fi
 

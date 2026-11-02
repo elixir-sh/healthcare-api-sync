@@ -95,25 +95,24 @@ def sync(target_date: str | None, days: int | None, dry_run: bool):
         from src.clients import notion_client
         from src.sync import is_synced, is_synced_to_notion
         storage.init_db()
-        notion_enabled = notion_client.is_configured()
+        checks = [
+            ("HealthPlanet→Google Health 体重", is_synced, "weight"),
+            ("HealthPlanet→Google Health 体脂肪率", is_synced, "body_fat"),
+        ]
+        if notion_client.is_configured():
+            checks += [
+                ("HealthPlanet→Notion 体重", is_synced_to_notion, "weight"),
+                ("HealthPlanet→Notion 体脂肪率", is_synced_to_notion, "body_fat"),
+            ]
+            problem = notion_client.config_problem()
+            if problem:
+                click.echo(f"⚠️ Notion への書き込みは失敗します: {problem}")
         current = date_from
         while current <= date_to:
             click.echo(f"\n📅 {current}")
-            checks = [
-                ("HealthPlanet→Google Health 体重", "weight"),
-                ("HealthPlanet→Google Health 体脂肪率", "body_fat"),
-            ]
-            for label, dtype in checks:
-                status = "✅ 同期済み" if is_synced(current, dtype) else "⬜ 未同期"
+            for label, synced, dtype in checks:
+                status = "✅ 同期済み" if synced(current, dtype) else "⬜ 未同期"
                 click.echo(f"  {status}  {label}")
-            if notion_enabled:
-                notion_checks = [
-                    ("HealthPlanet→Notion 体重", "weight"),
-                    ("HealthPlanet→Notion 体脂肪率", "body_fat"),
-                ]
-                for label, dtype in notion_checks:
-                    status = "✅ 同期済み" if is_synced_to_notion(current, dtype) else "⬜ 未同期"
-                    click.echo(f"  {status}  {label}")
             current += timedelta(days=1)
         return
 
