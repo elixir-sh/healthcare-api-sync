@@ -12,6 +12,13 @@ healthplanet:
   client_secret: ""
   redirect_uri: "http://localhost:8080/callback"
 
+# Notion の体重データベース（任意。両方とも空なら Notion への書き込みを飛ばす）
+# https://www.notion.so/profile/integrations で作ったインテグレーションのトークンと、
+# 書き込み先データベースの data source ID を記入する（README 参照）
+notion:
+  token: ""
+  weight_data_source_id: ""
+
 # 同期設定
 sync:
   # デフォルトの同期日数（直近N日分）

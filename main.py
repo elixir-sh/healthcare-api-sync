@@ -19,7 +19,7 @@ from src.config import load_config
 def cli():
     """健康データ集約・同期ツール
 
-    タニタ HealthPlanet の体組成データを Google Health に同期します。
+    タニタ HealthPlanet の体組成データを Google Health(設定時は Notion にも)に同期します。
     """
 
 
@@ -85,8 +85,10 @@ def sync(target_date: str | None, days: int | None, dry_run: bool):
     if dry_run:
         click.echo("（ドライラン: 実際の書き込みは行いません）")
         from src import storage
-        from src.sync import is_synced
+        from src.clients import notion_client
+        from src.sync import is_synced, is_synced_to_notion
         storage.init_db()
+        notion_enabled = notion_client.is_configured()
         current = date_from
         while current <= date_to:
             click.echo(f"\n📅 {current}")
@@ -97,6 +99,14 @@ def sync(target_date: str | None, days: int | None, dry_run: bool):
             for label, dtype in checks:
                 status = "✅ 同期済み" if is_synced(current, dtype) else "⬜ 未同期"
                 click.echo(f"  {status}  {label}")
+            if notion_enabled:
+                notion_checks = [
+                    ("HealthPlanet→Notion 体重", "weight"),
+                    ("HealthPlanet→Notion 体脂肪率", "body_fat"),
+                ]
+                for label, dtype in notion_checks:
+                    status = "✅ 同期済み" if is_synced_to_notion(current, dtype) else "⬜ 未同期"
+                    click.echo(f"  {status}  {label}")
             current += timedelta(days=1)
         return
 

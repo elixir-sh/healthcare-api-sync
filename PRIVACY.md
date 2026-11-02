@@ -6,9 +6,11 @@ healthcare-api-sync は、利用者が自分の環境（PC または自分の Gi
 
 ツールはタニタ HealthPlanet から体重と体脂肪率を読み取り、利用者の Google アカウントの Google Health に書き込む。Google Health に対して要求する権限は、体組成データの書き込み専用スコープ（`googlehealth.health_metrics_and_measurements.writeonly`）だけである。Google Health のデータを読み取ることはない。
 
+利用者が Notion の設定をした場合に限り、HealthPlanet から読み取った同じ体重と体脂肪率を、利用者自身の Notion のデータベースにも書き込む。Notion へのアクセスには、利用者が自分で作成したインテグレーションのトークンを使う。
+
 ## データの保存場所
 
-認証トークンと同期履歴は、利用者の PC の `config/` 配下に保存される。GitHub Actions で動かす場合は、利用者の private リポジトリの Secrets と、暗号化した Actions キャッシュに保存される。どちらも利用者自身が管理する場所であり、第三者には送信しない。
+認証トークン（Notion のトークンを含む）と同期履歴は、利用者の PC の `config/` 配下に保存される。GitHub Actions で動かす場合は、利用者の private リポジトリの Secrets と、暗号化した Actions キャッシュに保存される。どちらも利用者自身が管理する場所であり、第三者には送信しない。
 
 ## Google ユーザーデータの取り扱い
 
